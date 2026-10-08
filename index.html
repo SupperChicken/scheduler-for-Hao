@@ -1101,6 +1101,307 @@ const Core = (() => {
 })();
 
 
+/* ===== XW: tự viết file Excel (.xlsx) CÓ MÀU, không cần thư viện ngoài ===== */
+/* Phân Ca Sân Bay · Bản quyền © 2026 ThienNV · thiennv@vnpt-technology.vn · 0888.99.33.00 */
+const XW = (() => {
+  const enc = new TextEncoder();
+  const xmlEsc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '');
+  /* ---- zip (lưu, không nén) ---- */
+  const CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+  const crc32 = b => { let c = 0xFFFFFFFF; for (let i = 0; i < b.length; i++) c = CRC[(c ^ b[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
+  function zip(files) {
+    const parts = [], central = []; let off = 0;
+    const u16 = v => [v & 255, (v >>> 8) & 255], u32 = v => [v & 255, (v >>> 8) & 255, (v >>> 16) & 255, (v >>> 24) & 255];
+    for (const f of files) {
+      const name = enc.encode(f.name), data = typeof f.data === 'string' ? enc.encode(f.data) : f.data, crc = crc32(data);
+      const head = [0x50, 0x4b, 0x03, 0x04, ...u16(20), ...u16(0x0800), ...u16(0), ...u16(0), ...u16(0x21), ...u32(crc), ...u32(data.length), ...u32(data.length), ...u16(name.length), ...u16(0)];
+      parts.push(new Uint8Array(head), name, data);
+      central.push([0x50, 0x4b, 0x01, 0x02, ...u16(20), ...u16(20), ...u16(0x0800), ...u16(0), ...u16(0), ...u16(0x21), ...u32(crc), ...u32(data.length), ...u32(data.length), ...u16(name.length), ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(off)], name);
+      off += head.length + name.length + data.length;
+    }
+    let csize = 0; const cparts = [];
+    for (let i = 0; i < central.length; i += 2) { const h = new Uint8Array(central[i]); cparts.push(h, central[i + 1]); csize += h.length + central[i + 1].length; }
+    const end = new Uint8Array([0x50, 0x4b, 0x05, 0x06, 0, 0, 0, 0, ...u16(files.length), ...u16(files.length), ...u32(csize), ...u32(off), 0, 0]);
+    const all = [...parts, ...cparts, end]; const total = all.reduce((a, b) => a + b.length, 0);
+    const out = new Uint8Array(total); let p = 0; for (const a of all) { out.set(a, p); p += a.length; }
+    return out;
+  }
+  const colName = c => { let s = ''; c++; while (c) { const m = (c - 1) % 26; s = String.fromCharCode(65 + m) + s; c = Math.floor((c - 1) / 26); } return s; };
+  const ref = (r, c) => colName(c) + (r + 1);
+  /* ---- kiểu ô ---- */
+  function Styles() {
+    const fonts = ['<font><sz val="10"/><name val="Arial"/></font>'], fills = ['<fill><patternFill patternType="none"/></fill>', '<fill><patternFill patternType="gray125"/></fill>'];
+    const borders = ['<border><left/><right/><top/><bottom/><diagonal/></border>', '<border><left style="thin"><color rgb="FFD7DDE6"/></left><right style="thin"><color rgb="FFD7DDE6"/></right><top style="thin"><color rgb="FFD7DDE6"/></top><bottom style="thin"><color rgb="FFD7DDE6"/></bottom><diagonal/></border>',
+      '<border><left style="medium"><color rgb="FFC62F2F"/></left><right style="medium"><color rgb="FFC62F2F"/></right><top style="medium"><color rgb="FFC62F2F"/></top><bottom style="medium"><color rgb="FFC62F2F"/></bottom><diagonal/></border>'];
+    const xfs = ['<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>']; const map = {}, fmap = {}, flmap = {};
+    const font = f => { const k = JSON.stringify(f); if (fmap[k] == null) { fmap[k] = fonts.length; fonts.push('<font>' + (f.b ? '<b/>' : '') + (f.i ? '<i/>' : '') + '<sz val="' + (f.sz || 10) + '"/>' + (f.color ? '<color rgb="FF' + f.color + '"/>' : '') + '<name val="' + (f.name || 'Arial') + '"/></font>'); } return fmap[k]; };
+    const fill = c => { if (!c) return 0; if (flmap[c] == null) { flmap[c] = fills.length; fills.push('<fill><patternFill patternType="solid"><fgColor rgb="FF' + c + '"/><bgColor indexed="64"/></patternFill></fill>'); } return flmap[c]; };
+    return {
+      id(s) {
+        if (!s) return 0; const k = JSON.stringify(s); if (map[k] != null) return map[k];
+        const fo = font({ b: s.b, i: s.i, sz: s.sz, color: s.color, name: s.mono ? 'Consolas' : null }), fi = fill(s.fill), bo = s.err ? 2 : s.border === false ? 0 : 1;
+        const al = '<alignment horizontal="' + (s.h || 'left') + '" vertical="' + (s.v || 'top') + '"' + (s.wrap !== false ? ' wrapText="1"' : '') + '/>';
+        map[k] = xfs.length; xfs.push('<xf numFmtId="' + (s.num || 0) + '" fontId="' + fo + '" fillId="' + fi + '" borderId="' + bo + '" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"' + (s.num ? ' applyNumberFormat="1"' : '') + '>' + al + '</xf>');
+        return map[k];
+      },
+      xml() {
+        return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="1"><numFmt numFmtId="164" formatCode="0.##"/></numFmts>' +
+          '<fonts count="' + fonts.length + '">' + fonts.join('') + '</fonts><fills count="' + fills.length + '">' + fills.join('') + '</fills><borders count="' + borders.length + '">' + borders.join('') + '</borders>' +
+          '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="' + xfs.length + '">' + xfs.join('') + '</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>';
+      }
+    };
+  }
+  /* sheet: {name, rows:[[v | {v, s}]], merges:[[r1,c1,r2,c2]], cols:[w], freeze:{r,c}, heights:{r:h}, landscape} */
+  function sheetXml(sh, st) {
+    let x = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">';
+    x += '<sheetPr>' + (sh.tab ? '<tabColor rgb="FF' + sh.tab + '"/>' : '') + '<pageSetUpPr fitToPage="1"/></sheetPr>';
+    x += '<sheetViews><sheetView workbookViewId="0"' + (sh.zoom ? ' zoomScale="' + sh.zoom + '"' : '') + '>';
+    if (sh.freeze) { const { r, c } = sh.freeze; x += '<pane' + (c ? ' xSplit="' + c + '"' : '') + (r ? ' ySplit="' + r + '"' : '') + ' topLeftCell="' + ref(r, c) + '" activePane="' + (r && c ? 'bottomRight' : r ? 'bottomLeft' : 'topRight') + '" state="frozen"/>'; }
+    x += '</sheetView></sheetViews><sheetFormatPr defaultRowHeight="15"/>';
+    if (sh.cols) x += '<cols>' + sh.cols.map((w, i) => '<col min="' + (i + 1) + '" max="' + (i + 1) + '" width="' + w + '" customWidth="1"/>').join('') + '</cols>';
+    x += '<sheetData>';
+    sh.rows.forEach((row, r) => {
+      const h = sh.heights && sh.heights[r];
+      x += '<row r="' + (r + 1) + '"' + (h ? ' ht="' + h + '" customHeight="1"' : '') + '>';
+      (row || []).forEach((cell, c) => {
+        if (cell == null) return;
+        const o = typeof cell === 'object' && !(cell instanceof Date) ? cell : { v: cell };
+        const s = st.id(o.s); const a = ' r="' + ref(r, c) + '"' + (s ? ' s="' + s + '"' : '');
+        if (o.v == null || o.v === '') { if (s) x += '<c' + a + '/>'; return; }
+        if (typeof o.v === 'number' && isFinite(o.v)) x += '<c' + a + '><v>' + o.v + '</v></c>';
+        else x += '<c' + a + ' t="inlineStr"><is><t xml:space="preserve">' + xmlEsc(o.v) + '</t></is></c>';
+      });
+      x += '</row>';
+    });
+    x += '</sheetData>';
+    if (sh.merges && sh.merges.length) x += '<mergeCells count="' + sh.merges.length + '">' + sh.merges.map(m => '<mergeCell ref="' + ref(m[0], m[1]) + ':' + ref(m[2], m[3]) + '"/>').join('') + '</mergeCells>';
+    x += '<pageMargins left="0.3" right="0.3" top="0.4" bottom="0.4" header="0.2" footer="0.2"/><pageSetup paperSize="9" orientation="' + (sh.landscape === false ? 'portrait' : 'landscape') + '" fitToWidth="1" fitToHeight="0"/>';
+    if (sh.footer) x += '<headerFooter><oddFooter>' + xmlEsc('&L&8' + String(sh.footer).replace(/&/g, '&&') + '&R&8Trang &P/&N') + '</oddFooter></headerFooter>';
+    return x + '</worksheet>';
+  }
+  function build(sheets, props) {
+    const st = Styles(); const sx = sheets.map(sh => sheetXml(sh, st));
+    const now = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+    const files = [
+      { name: '[Content_Types].xml', data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' + sheets.map((_, i) => '<Override PartName="/xl/worksheets/sheet' + (i + 1) + '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>').join('') + '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/></Types>' },
+      { name: '_rels/.rels', data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/></Relationships>' },
+      { name: 'docProps/core.xml', data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>' + xmlEsc(props.title || '') + '</dc:title><dc:creator>' + xmlEsc(props.author || '') + '</dc:creator><dc:description>' + xmlEsc(props.comments || '') + '</dc:description><dcterms:created xsi:type="dcterms:W3CDTF">' + now + '</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">' + now + '</dcterms:modified></cp:coreProperties>' },
+      { name: 'docProps/app.xml', data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>Phan Ca San Bay</Application><Company>' + xmlEsc(props.company || '') + '</Company></Properties>' },
+      { name: 'xl/workbook.xml', data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><bookViews><workbookView/></bookViews><sheets>' + sheets.map((s, i) => '<sheet name="' + xmlEsc(s.name.slice(0, 31)) + '" sheetId="' + (i + 1) + '" r:id="rId' + (i + 1) + '"/>').join('') + '</sheets></workbook>' },
+      { name: 'xl/_rels/workbook.xml.rels', data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' + sheets.map((_, i) => '<Relationship Id="rId' + (i + 1) + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet' + (i + 1) + '.xml"/>').join('') + '<Relationship Id="rId' + (sheets.length + 1) + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>' },
+      ...sx.map((d, i) => ({ name: 'xl/worksheets/sheet' + (i + 1) + '.xml', data: d })),
+      { name: 'xl/styles.xml', data: st.xml() }
+    ];
+    return zip(files);
+  }
+
+  /* ===== Bảng màu giống giao diện web ===== */
+  const K = {
+    ink: '14213D', ink2: '4A5874', mute: '7C889E', accent: 'F2B705', accentSoft: 'FFF3C4', panel2: 'F6F8FA', line2: 'E7EBF0',
+    night: '1F2F57', nightInk: 'FFFFFF', day: 'E6ECF5', ok: '1F8A4C', okSoft: 'E3F4EA', warn: 'B26A00', warnSoft: 'FFF1D9', err: 'C62F2F', errSoft: 'FDE6E4',
+    off: '6B7486', offSoft: 'ECEFF3', leave: '7A4BB8', leaveSoft: 'EFE7FA', sby: '1C6FB8', sbySoft: 'E2EFFB', duty: '4A5874', dutySoft: 'F1F3F7',
+    g: { 1: 'F6E3DC', 2: 'DCF0FA', 3: 'E2F3DC', 4: 'FBE9DF', 5: 'FBF7D6', 6: 'D9E9F6', 7: 'EBE8F3' }
+  };
+  const S = {
+    title: { b: true, sz: 14, color: 'FFFFFF', fill: K.ink, v: 'center', wrap: false },
+    sub: { i: true, color: K.ink2, fill: K.panel2, wrap: false },
+    hdr: { b: true, color: 'FFFFFF', fill: K.ink, h: 'center', v: 'center' },
+    hdrToday: { b: true, color: K.ink, fill: K.accent, h: 'center', v: 'center' },
+    hdr2: { b: true, sz: 9, color: K.ink2, fill: K.line2, h: 'center' },
+    grp: { b: true, color: K.ink2, fill: K.panel2, wrap: false },
+    foothead: { b: true, color: K.ink, fill: K.accentSoft, wrap: false },
+    name: g => ({ b: true, fill: K.g[g] || K.g[3] }),
+    plain: {}, num: { h: 'right' }, numBad: { h: 'right', b: true, color: K.err },
+    st: { off: { b: true, color: K.off, fill: K.offSoft }, leave: { b: true, color: K.leave, fill: K.leaveSoft }, sby: { b: true, color: K.sby, fill: K.sbySoft }, duty: { b: true, color: K.duty, fill: K.dutySoft }, '': { b: true, color: K.duty, fill: K.dutySoft } },
+    fDay: { b: true, mono: true, color: K.ink, fill: K.day }, fNight: { b: true, mono: true, color: K.nightInk, fill: K.night },
+    cOk: { b: true, h: 'center', color: K.ok, fill: K.okSoft }, cShort: { b: true, h: 'center', color: K.err, fill: K.errSoft }, cOver: { b: true, h: 'center', color: K.warn, fill: K.warnSoft }, cOff: { h: 'center', color: K.mute, fill: K.offSoft },
+    bay: { b: true, color: K.ok, fill: K.okSoft }, canx: { b: true, color: K.err, fill: K.errSoft },
+    copy: { i: true, sz: 9, color: K.mute, border: false, wrap: false }
+  };
+  const withErr = s => Object.assign({}, s, { err: true });
+
+  /* ===== Dựng toàn bộ file từ dữ liệu tuần ===== */
+  function exportWeek(cfg, week, opt) {
+    const C = Core, DAYS = C.DAYS; opt = opt || {};
+    const val = C.validate(cfg, week), per = C.stats(cfg, week).per, cov = val.cov, cm = C.codeMap(cfg), sm = C.slotMap(cfg);
+    const today = opt.todayIdx == null ? -1 : opt.todayIdx;
+    const wname = C.dayLabel(week.start, 0).slice(3) + ' – ' + C.dayLabel(week.start, 6).slice(3) + '/' + week.start.slice(0, 4);
+    const copyTxt = 'Tạo bằng Phân Ca Sân Bay · Bản quyền ' + (opt.copyright || '');
+    const codeK = c => { const k = c && c.status ? cm[C.key(c.status)] : null; return k ? k.kind : ''; };
+    const itemsTxt = c => (c && c.items || []).map(i => i.slot + (i.role ? '/' + i.role : '') + (i.tag && i.tag !== 'LJ3-4' ? '/' + i.tag : '')).join(' + ');
+    const hasNight = c => (c && c.items || []).some(i => sm[i.slot] && sm[i.slot].night);
+    const sheets = [];
+
+    /* --- 1. Lịch tuần --- */
+    {
+      const rows = [], merges = [], NC = 2 + 14 + 4;
+      rows.push([{ v: 'LỊCH PHÂN CA TUẦN ' + wname, s: S.title }, ...Array(NC - 1).fill({ v: '', s: S.title })]); merges.push([0, 0, 0, NC - 1]);
+      rows.push([{ v: 'Màu: xám = OFF · tím = phép/ốm/TS · xanh nhạt = standby · ô xanh than = có chuyến đêm · ô xanh nhạt = chuyến ngày · viền đỏ = vi phạm luật', s: S.sub }, ...Array(NC - 1).fill({ v: '', s: S.sub })]); merges.push([1, 0, 1, NC - 1]);
+      const h = [{ v: 'Nhân viên', s: S.hdr }, { v: 'CN trước', s: S.hdr }];
+      for (let d = 0; d < 7; d++) { h.push({ v: C.dayLabel(week.start, d), s: d === today ? S.hdrToday : S.hdr }, { v: '', s: d === today ? S.hdrToday : S.hdr }); merges.push([2, 2 + 2 * d, 2, 3 + 2 * d]); }
+      h.push({ v: 'Ca', s: S.hdr }, { v: 'Đêm', s: S.hdr }, { v: 'Giờ đêm', s: S.hdr }, { v: 'OFF', s: S.hdr });
+      rows.push(h);
+      const h2 = [{ v: '', s: S.hdr2 }, { v: '', s: S.hdr2 }]; for (let d = 0; d < 7; d++) h2.push({ v: 'Trạng thái', s: S.hdr2 }, { v: 'Chuyến', s: S.hdr2 }); for (let i = 0; i < 4; i++) h2.push({ v: '', s: S.hdr2 });
+      rows.push(h2);
+      for (const g of cfg.groups) {
+        const list = cfg.staff.filter(s => s.group === g.id); if (!list.length) continue;
+        rows.push([{ v: g.name.toUpperCase() + ' · ' + list.length, s: S.grp }, ...Array(NC - 1).fill({ v: '', s: S.grp })]); merges.push([rows.length - 1, 0, rows.length - 1, NC - 1]);
+        for (const sf of list) {
+          const p = per[sf.id] || {}; const carry = week.carry && week.carry[sf.id];
+          const r = [{ v: sf.name + (sf.tags && sf.tags.length ? ' ' + sf.tags.join(' ') : ''), s: S.name(sf.group) },
+            { v: carry ? [carry.status, itemsTxt(carry)].filter(Boolean).join(' · ') : '', s: carry && hasNight(carry) ? S.fNight : carry && (carry.items || []).length ? S.fDay : S.plain }];
+          for (let d = 0; d < 7; d++) {
+            const c = C.cellOf(week, sf.id, d); const iss = val.cellIssues[sf.id + '|' + d]; const bad = iss && iss.some(x => x.level === 'err');
+            const stTxt = c ? [c.status, c.note].filter(Boolean).join(' ') : '';
+            let s1 = c && c.status ? S.st[codeK(c)] || S.st[''] : S.plain;
+            let s2 = c && (c.items || []).length ? (hasNight(c) ? S.fNight : S.fDay) : S.plain;
+            if (bad) { s1 = withErr(s1); s2 = withErr(s2); }
+            r.push({ v: stTxt, s: s1 }, { v: itemsTxt(c), s: s2 });
+          }
+          r.push({ v: p.slots || '', s: S.num }, { v: p.nights || '', s: p.nights > cfg.rules.maxNightsPerWeek ? S.numBad : S.num }, { v: p.nightHours || '', s: S.num }, { v: p.off || '', s: (p.off || 0) < cfg.rules.minOffPerWeek && sf.kind === 'flight' && sf.active ? S.numBad : S.num });
+          rows.push(r);
+        }
+      }
+      // bảng đếm quân số cuối bảng
+      rows.push([]);
+      rows.push([{ v: 'ĐẾM QUÂN SỐ THEO CHUYẾN · đã xếp / cần', s: S.foothead }, ...Array(NC - 1).fill({ v: '', s: S.foothead })]); merges.push([rows.length - 1, 0, rows.length - 1, NC - 1]);
+      const shortDay = [0, 0, 0, 0, 0, 0, 0];
+      for (const s of cfg.slots) {
+        const row = cov[s.id]; let any = false, wShort = 0;
+        for (let d = 0; d < 7; d++) { if ((row[d].on && row[d].needT) || row[d].haveT) any = true; if (row[d].on) { wShort += row[d].short; shortDay[d] += row[d].short; } }
+        if (!any) continue;
+        const r = [{ v: s.id + ' · ' + s.flight + ' ' + C.fmtTime(s.time), s: { b: true, mono: true, fill: K.panel2 } }, { v: '', s: S.plain }];
+        for (let d = 0; d < 7; d++) {
+          const x = row[d]; const miss = ['S', 'C', 'G', 'GC', 'SE'].filter(q => +x.need[q] && (x.have[q] || 0) < +x.need[q]).map(q => 'thiếu /' + q).join(' ');
+          const v = x.on ? x.haveT + '/' + x.needT + (miss ? ' ' + miss : '') : (x.haveT ? 'CANX · ' + x.haveT : '—');
+          const st = !x.on ? (x.haveT ? S.cOver : S.cOff) : x.short ? S.cShort : x.over ? S.cOver : S.cOk;
+          r.push({ v, s: st }, { v: '', s: st }); merges.push([rows.length, 2 + 2 * d, rows.length, 3 + 2 * d]);
+        }
+        r.push({ v: wShort ? 'thiếu ' + wShort : '✓', s: wShort ? S.cShort : S.cOk }, { v: '', s: wShort ? S.cShort : S.cOk }, { v: '', s: wShort ? S.cShort : S.cOk }, { v: '', s: wShort ? S.cShort : S.cOk }); merges.push([rows.length, 16, rows.length, 19]);
+        rows.push(r);
+      }
+      const cnt = f => [0, 1, 2, 3, 4, 5, 6].map(d => cfg.staff.reduce((a, sf) => a + f(C.cellOf(week, sf.id, d)), 0));
+      const tot = [['Tổng vị trí còn thiếu', shortDay, true], ['Số người đi làm', cnt(c => c && (c.items || []).length ? 1 : 0)], ['OFF', cnt(c => { const k = c && c.status ? cm[C.key(c.status)] : null; return k && k.kind === 'off' ? (+k.off || 0) : 0; })],
+        ['Phép / ốm / thai sản', cnt(c => codeK(c) === 'leave' ? 1 : 0)], ['Standby (SBY)', cnt(c => codeK(c) === 'sby' ? 1 : 0)]];
+      for (const [label, arr, red] of tot) {
+        const r = [{ v: label, s: { b: true, fill: K.line2 } }, { v: '', s: { fill: K.line2 } }];
+        arr.forEach((v, d) => { const st = red ? (v ? S.cShort : S.cOk) : { b: true, h: 'center', fill: K.line2 }; r.push({ v: v, s: st }, { v: '', s: st }); merges.push([rows.length, 2 + 2 * d, rows.length, 3 + 2 * d]); });
+        rows.push(r);
+      }
+      rows.push([]); rows.push([{ v: copyTxt, s: S.copy }]);
+      sheets.push({ name: 'Lịch tuần', rows, merges, cols: [24, 13, ...Array(14).fill(0).map((_, i) => i % 2 ? 15 : 11), 6, 6, 8, 6], freeze: { r: 4, c: 1 }, heights: { 0: 24 }, tab: K.ink, footer: copyTxt });
+    }
+
+    /* --- 2. Quân số --- */
+    {
+      const rows = [], merges = [];
+      rows.push([{ v: 'QUÂN SỐ THEO CHUYẾN · tuần ' + wname, s: S.title }, ...Array(9).fill({ v: '', s: S.title })]); merges.push([0, 0, 0, 9]);
+      rows.push([{ v: 'Slot', s: S.hdr }, { v: 'Chuyến', s: S.hdr }, ...DAYS.map((x, d) => ({ v: C.dayLabel(week.start, d), s: d === today ? S.hdrToday : S.hdr })), { v: 'Tuần', s: S.hdr }]);
+      for (const s of cfg.slots) {
+        const row = cov[s.id]; let any = false, wn = 0, wh = 0;
+        for (let d = 0; d < 7; d++) { if ((row[d].on && row[d].needT) || row[d].haveT) any = true; wn += row[d].on ? row[d].needT : 0; wh += row[d].haveT; }
+        if (!any) continue;
+        const r = [{ v: s.id, s: { b: true, mono: true, fill: s.night ? K.day : K.panel2 } }, { v: s.flight + ' · ' + C.fmtTime(s.time) + (s.night ? ' · đêm' : ''), s: S.plain }];
+        for (let d = 0; d < 7; d++) {
+          const x = row[d]; const parts = ['S', 'C', 'G', 'GC', 'SE'].filter(q => (+x.need[q] || 0) || x.have[q]).map(q => q + ' ' + (x.have[q] || 0) + '/' + (+x.need[q] || 0)).join(' · ');
+          r.push({ v: x.on ? x.haveT + '/' + x.needT + (parts ? '\n' + parts : '') : (x.haveT ? 'CANX · ' + x.haveT : 'Không bay'), s: !x.on ? (x.haveT ? S.cOver : S.cOff) : x.short ? S.cShort : x.over ? S.cOver : S.cOk });
+        }
+        r.push({ v: wh + '/' + wn, s: wh < wn ? S.cShort : S.cOk });
+        rows.push(r);
+      }
+      rows.push([]); rows.push([{ v: copyTxt, s: S.copy }]);
+      sheets.push({ name: 'Quân số', rows, merges, cols: [9, 20, 14, 14, 14, 14, 14, 14, 14, 10], freeze: { r: 2, c: 2 }, heights: { 0: 24 }, tab: K.ok, footer: copyTxt });
+    }
+
+    /* --- 3. Lịch bay --- */
+    {
+      const rows = [], merges = [];
+      rows.push([{ v: 'LỊCH BAY · tuần ' + wname, s: S.title }, ...Array(7).fill({ v: '', s: S.title })]); merges.push([0, 0, 0, 7]);
+      rows.push([{ v: 'Slot', s: S.hdr }, ...DAYS.map((x, d) => ({ v: C.dayLabel(week.start, d), s: d === today ? S.hdrToday : S.hdr }))]);
+      for (const s of cfg.slots) {
+        const ps = DAYS.map((x, d) => C.planOf(cfg, week, s.id, d));
+        if (!ps.some(p => p.on || p.label)) continue;
+        rows.push([{ v: s.id, s: { b: true, mono: true, fill: s.night ? K.day : K.panel2 } }, ...ps.map(p => ({ v: (p.label || '') + (p.on ? '' : ' · CANX'), s: p.on ? S.bay : S.canx }))]);
+      }
+      rows.push([]); rows.push([{ v: copyTxt, s: S.copy }]);
+      sheets.push({ name: 'Lịch bay', rows, merges, cols: [9, 18, 18, 18, 18, 18, 18, 18], freeze: { r: 2, c: 1 }, heights: { 0: 24 }, tab: K.accent, footer: copyTxt });
+    }
+
+    /* --- 4. Order nghỉ --- */
+    {
+      const rows = [], merges = [];
+      rows.push([{ v: 'ORDER NGHỈ / TRẠNG THÁI · tuần ' + wname, s: S.title }, ...Array(8).fill({ v: '', s: S.title })]); merges.push([0, 0, 0, 8]);
+      rows.push([{ v: 'Nhân viên', s: S.hdr }, ...DAYS.map((x, d) => ({ v: C.dayLabel(week.start, d), s: d === today ? S.hdrToday : S.hdr })), { v: 'Tổng OFF', s: S.hdr }]);
+      for (const g of cfg.groups) {
+        const list = cfg.staff.filter(s => s.group === g.id); if (!list.length) continue;
+        rows.push([{ v: g.name.toUpperCase(), s: S.grp }, ...Array(8).fill({ v: '', s: S.grp })]); merges.push([rows.length - 1, 0, rows.length - 1, 8]);
+        for (const sf of list) {
+          const r = [{ v: sf.name, s: S.name(sf.group) }]; let off = 0;
+          for (let d = 0; d < 7; d++) { const c = C.cellOf(week, sf.id, d); const k = c && c.status ? cm[C.key(c.status)] : null; if (k && k.kind === 'off') off += +k.off || 0; r.push({ v: c ? [c.status, c.note].filter(Boolean).join(' ') : '', s: c && c.status ? S.st[codeK(c)] || S.st[''] : S.plain }); }
+          r.push({ v: off, s: off < cfg.rules.minOffPerWeek && sf.kind === 'flight' && sf.active ? S.numBad : S.num });
+          rows.push(r);
+        }
+      }
+      rows.push([]); rows.push([{ v: copyTxt, s: S.copy }]);
+      sheets.push({ name: 'Order nghỉ', rows, merges, cols: [24, 15, 15, 15, 15, 15, 15, 15, 9], freeze: { r: 2, c: 1 }, heights: { 0: 24 }, tab: K.leave, footer: copyTxt });
+    }
+
+    /* --- 5. Thống kê --- */
+    {
+      const airlines = [...new Set(cfg.slots.filter(s => s.active).map(s => s.airline))];
+      const rows = [], merges = []; const NC = 9 + airlines.length;
+      rows.push([{ v: 'THỐNG KÊ CÔNG BẰNG · tuần ' + wname, s: S.title }, ...Array(NC - 1).fill({ v: '', s: S.title })]); merges.push([0, 0, 0, NC - 1]);
+      rows.push(['Nhân viên', 'Slot', 'Đêm', 'Đêm tuần trước', 'Giờ công đêm', 'Ngày làm', 'OFF', 'Phép/ốm', 'SBY', ...airlines].map(v => ({ v, s: S.hdr })));
+      const fl = cfg.staff.filter(s => s.kind === 'flight');
+      const maxNH = Math.max(1, ...fl.map(s => per[s.id].nightHours || 0));
+      for (const sf of fl) {
+        const p = per[sf.id]; const t = (p.nightHours || 0) / maxNH;
+        const heat = t > 0.85 ? 'F6C9C4' : t > 0.6 ? 'FBE3C4' : t > 0.3 ? 'E9F2D9' : 'F4F6F8';
+        rows.push([{ v: sf.name, s: S.name(sf.group) }, { v: p.slots, s: S.num }, { v: p.nights, s: p.nights > cfg.rules.maxNightsPerWeek ? S.numBad : S.num }, { v: p.prevNights, s: S.num }, { v: p.nightHours, s: { h: 'right', b: true, fill: heat } }, { v: p.workDays, s: S.num }, { v: p.off, s: S.num }, { v: p.leave, s: S.num }, { v: p.sby, s: S.num }, ...airlines.map(a => ({ v: p.byAirline[a] || '', s: S.num }))]);
+      }
+      rows.push([]); rows.push([{ v: 'Ô "Giờ công đêm" càng đỏ là càng nhiều giờ đêm so với người khác.', s: S.copy }]); rows.push([{ v: copyTxt, s: S.copy }]);
+      sheets.push({ name: 'Thống kê', rows, merges, cols: [24, 7, 7, 10, 10, 9, 7, 9, 7, ...airlines.map(() => 6)], freeze: { r: 2, c: 1 }, heights: { 0: 24 }, tab: K.sby, footer: copyTxt });
+    }
+
+    /* --- 6. Chấm công --- */
+    {
+      const ts = C.timesheet(cfg, week); const rows = [], merges = [];
+      const hd = ['Nhân viên']; for (let d = 0; d < 7; d++) hd.push(C.dayLabel(week.start, d), '', '', '');
+      hd.push('Tổng OVER ngày (phút)', 'Tổng OVER đêm', 'Tổng BÙ ngày', 'Tổng BÙ đêm', 'Giờ công', 'Giờ công thực tế', 'Giờ đêm theo ca', 'Giờ công đêm thực tế');
+      const NC = hd.length;
+      rows.push([{ v: 'CHẤM CÔNG OVER / BÙ · tuần ' + wname, s: S.title }, ...Array(NC - 1).fill({ v: '', s: S.title })]); merges.push([0, 0, 0, NC - 1]);
+      rows.push(hd.map(v => ({ v, s: S.hdr }))); for (let d = 0; d < 7; d++) merges.push([1, 1 + 4 * d, 1, 4 + 4 * d]);
+      const h2 = [{ v: '', s: S.hdr2 }]; for (let d = 0; d < 7; d++) h2.push(...['OVER N', 'OVER Đ', 'BÙ N', 'BÙ Đ'].map(v => ({ v, s: S.hdr2 }))); for (let i = 0; i < 8; i++) h2.push({ v: '', s: S.hdr2 });
+      rows.push(h2);
+      for (const sf of cfg.staff.filter(s => s.kind === 'flight' && s.active)) {
+        const o = (week.over && week.over[sf.id]) || {}; const t = ts[sf.id];
+        const r = [{ v: sf.name, s: S.name(sf.group) }];
+        for (let d = 0; d < 7; d++) { const x = o[d] || {}; r.push(...['on', 'od', 'bn', 'bd'].map(k => ({ v: x[k] === '' || x[k] == null ? '' : +x[k], s: x[k] ? { h: 'right', fill: k[0] === 'o' ? K.warnSoft : K.sbySoft } : S.num }))); }
+        const rd = v => Math.round(v * 100) / 100;
+        r.push({ v: t.on, s: S.num }, { v: t.od, s: S.num }, { v: t.bn, s: S.num }, { v: t.bd, s: S.num }, { v: t.base, s: S.num }, { v: rd(t.total), s: { h: 'right', b: true, fill: K.okSoft } }, { v: t.nightHours, s: S.num }, { v: rd(t.nightTotal), s: { h: 'right', b: true, fill: K.day } });
+        rows.push(r);
+      }
+      rows.push([]); rows.push([{ v: copyTxt, s: S.copy }]);
+      sheets.push({ name: 'Chấm công', rows, merges, cols: [24, ...Array(28).fill(6.5), 11, 11, 11, 11, 9, 11, 11, 12], freeze: { r: 3, c: 1 }, heights: { 0: 24 }, tab: K.warn, footer: copyTxt });
+    }
+
+    /* --- 7. Cảnh báo --- */
+    {
+      const rows = [], merges = [];
+      rows.push([{ v: 'CẢNH BÁO VÀ VI PHẠM · tuần ' + wname, s: S.title }, ...Array(3).fill({ v: '', s: S.title })]); merges.push([0, 0, 0, 3]);
+      rows.push(['Mức', 'Nhân viên', 'Ngày', 'Nội dung'].map(v => ({ v, s: S.hdr })));
+      const lst = val.list.slice().sort((a, b) => (a.level === 'err' ? 0 : 1) - (b.level === 'err' ? 0 : 1));
+      if (!lst.length) rows.push([{ v: 'OK', s: S.cOk }, { v: 'Không có vấn đề nào', s: S.plain }, '', '']);
+      for (const x of lst) { const st = x.level === 'err' ? { b: true, color: K.err, fill: K.errSoft } : { b: true, color: K.warn, fill: K.warnSoft }; const sf = x.sid ? cfg.staff.find(s => s.id === x.sid) : null; rows.push([{ v: x.level === 'err' ? 'Lỗi' : 'Cảnh báo', s: st }, { v: sf ? sf.name : '', s: S.plain }, { v: x.d >= 0 ? DAYS[x.d] : '', s: S.plain }, { v: x.msg, s: S.plain }]); }
+      rows.push([]); rows.push([{ v: copyTxt, s: S.copy }]);
+      sheets.push({ name: 'Cảnh báo', rows, merges, cols: [10, 24, 7, 80], freeze: { r: 2, c: 0 }, heights: { 0: 24 }, tab: K.err, landscape: false, footer: copyTxt });
+    }
+    return build(sheets, { title: 'Lịch phân ca ' + wname, author: opt.author || '', company: opt.company || '', comments: copyTxt });
+  }
+  return { build, exportWeek };
+})();
+
+
 </script>
 <script>
 (() => {
@@ -2049,28 +2350,12 @@ async function newWeekFlow() {
     } }]);
 }
 function exportXlsx() {
-  if (!window.XLSX) { toast('Chưa tải được thư viện Excel. Kiểm tra kết nối mạng rồi thử lại.'); return; }
   if (!Store.dl) { toast('Chế độ xem này không cho tải file.'); return; }
-  const wb = XLSX.utils.book_new();
-  wb.Props = { Title: 'Lịch phân ca ' + weekName(S.week.start), Author: 'ThienNV', Company: 'ThienNV · thiennv@vnpt-technology.vn · 0888.99.33.00', Comments: 'Tạo bằng Phân Ca Sân Bay ' + COPYRIGHT };
-  const r = C.exportRosterAOA(S.cfg, S.week);
-  r.rows.push([], ['Tạo bằng Phân Ca Sân Bay · Bản quyền ' + COPYRIGHT]);
-  const ws1 = XLSX.utils.aoa_to_sheet(r.rows); ws1['!merges'] = r.merges;
-  ws1['!cols'] = [{ wch: 22 }, { wch: 14 }, ...Array(14).fill({ wch: 16 }), ...Array(6).fill({ wch: 8 })];
-  ws1['!freeze'] = { xSplit: 1, ySplit: 3 };
-  XLSX.utils.book_append_sheet(wb, ws1, 'Lich tuan');
-  const ws2 = XLSX.utils.aoa_to_sheet(C.exportCoverageAOA(S.cfg, S.week)); ws2['!cols'] = [{ wch: 8 }, { wch: 16 }, ...Array(7).fill({ wch: 16 })];
-  XLSX.utils.book_append_sheet(wb, ws2, 'Quan so');
-  const per = S.st.per; const st = [['Nhân viên', 'Slot', 'Đêm', 'Đêm tuần trước', 'Giờ công đêm', 'Ngày làm', 'OFF', 'Phép/ốm', 'SBY']];
-  S.cfg.staff.filter(s => s.kind === 'flight').forEach(s => { const p = per[s.id]; st.push([s.name, p.slots, p.nights, p.prevNights, p.nightHours, p.workDays, p.off, p.leave, p.sby]); });
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(st), 'Thong ke');
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(C.exportTimesheetAOA(S.cfg, S.week)), 'Cham cong');
-  const iss = [['Mức', 'Nhân viên', 'Ngày', 'Nội dung']];
-  S.val.list.forEach(x => iss.push([x.level === 'err' ? 'Lỗi' : 'Cảnh báo', x.sid ? (staffById(x.sid) || {}).name : '', x.d >= 0 ? DAYS[x.d] : '', x.msg]));
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(iss), 'Canh bao');
-  const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+  let buf;
+  try { buf = XW.exportWeek(S.cfg, S.week, { todayIdx: dayIndexToday(), copyright: COPYRIGHT, author: 'ThienNV', company: 'ThienNV · thiennv@vnpt-technology.vn · 0888.99.33.00' }); }
+  catch (e) { toast('Không tạo được file Excel: ' + e.message); return; }
   const d0 = C.dayLabel(S.week.start, 0).slice(3).replace('/', ''), d6 = C.dayLabel(S.week.start, 6).slice(3).replace('/', '');
-  saveFile('LICH_' + d0 + '-' + d6 + '_' + S.week.start.slice(0, 4) + '.xlsx', new Uint8Array(buf));
+  saveFile('LICH_' + d0 + '-' + d6 + '_' + S.week.start.slice(0, 4) + '.xlsx', new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
 }
 async function saveFile(name, data) {
   try { await Store.dl.save({ filename: name, data }); toast('Đã tải ' + name); }
