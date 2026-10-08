@@ -47,7 +47,7 @@
 *{box-sizing:border-box}
 .ro .edit-only{display:none!important}
 /* đăng nhập & người dùng */
-.gate .tabs,.gate .weeknav,.gate #bUndo,.gate #bRedo,.gate #saveSt,.gate [data-act="auto"]{display:none!important}
+.gate .cam,.gate .tabs,.gate .weeknav,.gate #bUndo,.gate #bRedo,.gate #saveSt,.gate [data-act="auto"]{display:none!important}
 .userbox{display:flex;align-items:center;gap:8px;font-size:12px;flex-wrap:wrap}
 .userbox .who{opacity:.85;max-width:240px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .userbox .online{color:#9fe0b4;font-weight:600;white-space:nowrap}
@@ -313,6 +313,7 @@ td.c{text-align:center}
     <div class="spacer"></div>
     <button class="tbtn edit-only" data-act="undo" id="bUndo" title="Hoàn tác (Ctrl+Z)">↶ Hoàn tác</button>
     <button class="tbtn edit-only" data-act="redo" id="bRedo" title="Làm lại (Ctrl+Y)">↷</button>
+    <label class="tbtn edit-only cam" for="camQuick" title="Chụp hoặc chọn ảnh lịch / chấm công, AI tự đọc">📷 Nhập từ ảnh</label>
     <button class="tbtn edit-only" data-act="open-import">⇪ Nhập dữ liệu</button>
     <button class="tbtn pri edit-only" data-act="auto">Tự động chia</button>
     <div class="userbox" id="userBox"></div>
@@ -335,6 +336,7 @@ td.c{text-align:center}
 <div id="toastHost"></div>
 <input type="file" id="fileXlsx" accept=".xlsx,.xls" hidden>
 <input type="file" id="fileJson" accept=".json" hidden>
+<input type="file" id="camQuick" accept="image/*,application/pdf" multiple hidden>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
@@ -1461,6 +1463,7 @@ async function loadData() {
   if (S.weeks.includes(todayMon)) start = todayMon; else if (S.weeks.length) start = S.weeks[S.weeks.length - 1];
   if (start) await openWeek(start, true);
   S.ready = true; recompute(); render(); setSave(); Store.watch();
+  if (!S.ro && STANDALONE) loadSharedKey().then(() => { if (S.tab === 'cfg') render(); });
 }
 function migrateCfg(cfg) {
   cfg.rules = Object.assign(C.defaultRules(), cfg.rules || {});
@@ -2234,8 +2237,11 @@ document.addEventListener('click', async e => {
     case 'export-json': exportJson(); break;
     case 'open-import': openImport(t.dataset.k); break;
     case 'open-backups': openBackups(); break;
-    case 'gem-save': { const k = ($('#gemKey').value || '').trim(), m = ($('#gemModel').value || '').trim() || 'gemini-2.5-flash'; if (k) Store.lsSet('geminiKey', k); Store.lsSet('geminiModel', m); toast(k ? 'Đã lưu khoá AI trên máy này' : 'Chưa nhập khoá'); render(); break; }
-    case 'gem-del': try { localStorage.removeItem('pcsb:geminiKey'); } catch (e) {} toast('Đã xoá khoá AI khỏi máy này'); render(); break;
+    case 'gem-save': { const k = ($('#gemKey').value || '').trim(), m = ($('#gemModel').value || '').trim() || 'gemini-2.5-flash'; if (!/^AIza[\w-]{20,}$/.test(k)) { toast('Khoá không đúng dạng (bắt đầu bằng AIza…)'); break; } t.disabled = true; t.textContent = 'Đang kiểm tra…';
+      try { await saveSharedKey(k, m); await testSharedKey(); toast('Đã bật AI cho tất cả người làm lịch'); } catch (e) { toast('Đã lưu khoá nhưng kiểm tra lỗi: ' + e.message); } render(); break; }
+    case 'gem-test': t.disabled = true; try { await testSharedKey(); toast('Khoá hoạt động tốt'); } catch (e) { toast('Lỗi: ' + e.message); } t.disabled = false; break;
+    case 'gem-edit': { const f = $('#gemForm'); if (f) f.hidden = false; break; }
+    case 'gem-del': try { await delSharedKey(); toast('Đã tắt AI đọc ảnh'); } catch (e) { toast('Không tắt được: ' + (e.code === 'permission-denied' ? 'không có quyền' : e.message)); } render(); break;
     case 'signout': if (FBX.auth) { Store.unsub.forEach(u => { try { u(); } catch (e) {} }); await FBX.auth.signOut(); location.reload(); } break;
     case 'g-login': case 'pw-login': case 'pw-signup': case 'pw-reset': case 'verify-resend': case 'verify-check': case 'retry': authAction(a); break;
     case 'reload': location.reload(); break;
@@ -2253,6 +2259,7 @@ document.addEventListener('change', e => {
   const t = e.target;
   if (t.id === 'wkSel') { openWeek(t.value); return; }
   if (t.id === 'fileXlsx') { importXlsx(); return; }
+  if (t.id === 'camQuick') { const fs = [...t.files]; t.value = ''; quickPhoto(fs); return; }
   if (t.id === 'fileJson') { importJson(); return; }
   if (t.id === 'fg') { S.filter.group = +t.value; render(); return; }
   if (t.id === 'fi') { S.filter.issues = t.checked; render(); return; }
@@ -2316,6 +2323,7 @@ document.addEventListener('keydown', e => {
 });
 /* ================= NHẬP DỮ LIỆU ĐA NGUỒN: ảnh, văn bản, CSV, AI ================= */
 const IMP_KINDS = {
+  auto: { label: 'Tự nhận biết', desc: 'AI tự xem ảnh là phân ca, OFF/NP, chấm công hay lịch bay' },
   assign: { label: 'Phân ca', desc: 'chuyến + trạng thái của từng người, từng ngày' },
   leave: { label: 'OFF / NP / nghỉ', desc: 'chỉ trạng thái, giữ nguyên chuyến đã xếp' },
   ts: { label: 'Chấm công', desc: 'phút OVER / BÙ ngày, đêm' },
@@ -2459,6 +2467,37 @@ function gridTsRecs(rows) {
 }
 
 /* ---------- AI đọc ảnh / văn bản ---------- */
+// Khoá AI dùng chung: người quản lý dán MỘT lần, lưu trên Firebase (chỉ người làm lịch đọc được)
+const AIKEY = { loaded: false, key: '', model: 'gemini-2.5-flash', by: '', at: '' };
+async function loadSharedKey(force) {
+  if (AIKEY.loaded && !force) return AIKEY;
+  AIKEY.loaded = true; AIKEY.key = ''; AIKEY.by = '';
+  if (Store.mode === 'fb') {
+    try { const s = await FBX.fs.doc('secrets/ai').get(); if (s.exists) { const d = s.data(); AIKEY.key = d.geminiKey || ''; AIKEY.model = d.model || AIKEY.model; AIKEY.by = d.by || ''; AIKEY.at = d.at || ''; } } catch (e) {}
+  } else { AIKEY.key = Store.lsGet('geminiKey') || ''; AIKEY.model = Store.lsGet('geminiModel') || AIKEY.model; }
+  return AIKEY;
+}
+async function saveSharedKey(key, model) {
+  model = model || 'gemini-2.5-flash';
+  if (Store.mode === 'fb') await FBX.fs.doc('secrets/ai').set({ geminiKey: key, model, by: FBX.user ? FBX.user.email : '', at: new Date().toISOString() });
+  else { Store.lsSet('geminiKey', key); Store.lsSet('geminiModel', model); }
+  await loadSharedKey(true);
+}
+async function delSharedKey() {
+  if (Store.mode === 'fb') await FBX.fs.doc('secrets/ai').delete();
+  else { try { localStorage.removeItem('pcsb:geminiKey'); } catch (e) {} }
+  await loadSharedKey(true);
+}
+async function testSharedKey() {
+  const e = await aiEngine(); if (!e) throw new Error('Chưa có khoá');
+  const r = await e.call('Trả về JSON {"ok":true}', []); if (!r || r.ok !== true) throw new Error('AI trả lời không đúng');
+}
+function quickPhoto(files) {
+  if (!files || !files.length) return;
+  openImport('auto');
+  for (const f of files) S.imp.files.push({ file: f, name: f.name, pdf: f.type === 'application/pdf', url: f.type === 'application/pdf' ? '' : URL.createObjectURL(f), rot: 0 });
+  S.imp.autoRun = true; renderImport();
+}
 async function aiEngine() {
   if (!STANDALONE) {
     let sm = null; try { sm = await window.claude.use('sample'); } catch (e) {}
@@ -2466,8 +2505,8 @@ async function aiEngine() {
     let lim = null; try { lim = await sm.limits(); } catch (e) {}
     return { name: 'Claude', images: !!(lim && lim.images), pdf: false, call: async (prompt, blobs) => sm.json(prompt, Object.assign({ modelTier: 'default', cache: false }, blobs.length ? { images: blobs } : {})) };
   }
-  const key = Store.lsGet('geminiKey'); if (!key) return null;
-  const model = Store.lsGet('geminiModel') || 'gemini-2.5-flash';
+  const k = await loadSharedKey(); if (!k.key) return null;
+  const key = k.key, model = k.model || 'gemini-2.5-flash';
   return { name: 'Gemini · ' + model, images: true, pdf: true, call: async (prompt, blobs) => {
     const parts = [{ text: prompt }];
     for (const b of blobs) parts.push({ inline_data: { mime_type: b.type || 'image/jpeg', data: await blobB64(b) } });
@@ -2512,7 +2551,12 @@ function aiPrompt(kind, hasText) {
     'Mã trạng thái: ' + codes + '.\n\n' +
     'Quy tắc: chép đúng những gì nhìn thấy, không tự bịa thêm. Ô trống thì bỏ qua. Chữ không đọc được thì ghi dấu ? vào chỗ đó và hạ confidence. ' +
     '"name" là tên chuẩn gần nhất trong danh sách (để trống nếu không chắc), "name_raw" là tên đúng như viết trong tài liệu. confidence từ 0 đến 1.\n';
-  if (kind === 'assign' || kind === 'leave') p += 'Nhiệm vụ: chép bảng phân ca. Trả về JSON đúng dạng: {"rows":[{"name_raw":"...","name":"...","cells":{"T2":"nội dung ô","T3":"..."},"confidence":0.9}],"warnings":["..."]}. ' +
+  if (kind === 'auto') p += 'Nhiệm vụ: trước hết xác định tài liệu là loại nào: "assign" (bảng phân ca theo người và ngày, có chuyến và/hoặc trạng thái), "leave" (chỉ danh sách nghỉ OFF/NP/ốm), "ts" (chấm công OVER/BÙ, số phút hoặc giờ), "plan" (lịch bay: số hiệu chuyến, giờ, CANX). ' +
+    'Trả về JSON có trường "type" và dữ liệu tương ứng:\n' +
+    '- assign hoặc leave: {"type":"assign","rows":[{"name_raw":"...","name":"...","cells":{"T2":"nội dung ô"},"confidence":0.9}],"warnings":[]}. Khoá cells chỉ dùng T2..T7, CN; một ngày có 2 ô thì nối bằng " + ".\n' +
+    '- ts: {"type":"ts","rows":[{"name_raw":"...","name":"...","day":"T2","over_ngay":0,"over_dem":0,"bu_ngay":0,"bu_dem":0,"confidence":0.9}],"warnings":[]}, số liệu đổi ra PHÚT.\n' +
+    '- plan: {"type":"plan","flights":[{"slot":"mã slot","day":"T2","text":"TW008 1145 ICN","canx":false,"confidence":0.9}],"warnings":[]}.';
+  else if (kind === 'assign' || kind === 'leave') p += 'Nhiệm vụ: chép bảng phân ca. Trả về JSON đúng dạng: {"rows":[{"name_raw":"...","name":"...","cells":{"T2":"nội dung ô","T3":"..."},"confidence":0.9}],"warnings":["..."]}. ' +
     'Khoá trong cells chỉ dùng T2,T3,T4,T5,T6,T7,CN. Nếu một ngày có 2 ô (trạng thái và chuyến) thì nối bằng " + ". ' + (kind === 'leave' ? 'Chỉ cần các ô có trạng thái nghỉ (OFF, NP, ốm, phép…).' : '');
   else if (kind === 'ts') p += 'Nhiệm vụ: chép bảng chấm công làm thêm. Số liệu tính bằng PHÚT (nếu ghi giờ như 1h30 thì đổi ra 90). Trả về JSON: {"rows":[{"name_raw":"...","name":"...","day":"T2","over_ngay":0,"over_dem":0,"bu_ngay":0,"bu_dem":0,"confidence":0.9}],"warnings":[]}. Ô không có số thì để null.';
   else p += 'Nhiệm vụ: chép lịch bay theo ngày. Trả về JSON: {"flights":[{"slot":"mã slot trong danh sách nếu khớp","day":"T2","text":"số hiệu + giờ + sân bay như viết, vd TW008 1145 ICN","canx":false,"confidence":0.9}],"warnings":[]}.';
@@ -2579,8 +2623,12 @@ async function openBackups() {
 /* ---------- Trình nhập ---------- */
 function openImport(kind) {
   if (S.ro || !S.week) { if (!S.week) toast('Hãy tạo hoặc mở một tuần trước.'); return; }
-  S.imp = { step: 'source', kind: kind || 'assign', week: S.week.start, src: 'image', files: [], text: '', recs: [], warnings: [], engine: null, onlyIssues: false, mode: 'replace' };
-  aiEngine().then(e => { if (S.imp) { S.imp.engine = e; renderImport(); } });
+  S.imp = { step: 'source', kind: kind || 'auto', week: S.week.start, src: 'image', files: [], text: '', recs: [], warnings: [], engine: null, onlyIssues: false, mode: 'replace' };
+  aiEngine().then(e => {
+    if (!S.imp) return; S.imp.engine = e;
+    if (S.imp.autoRun) { S.imp.autoRun = false; if (e && e.images) { impRunAI(false); return; } S.imp.error = 'AI đọc ảnh chưa được bật. Người quản lý lịch cần bật một lần ở Cài đặt & dữ liệu → Nhập / xuất dữ liệu → Đọc ảnh bằng AI. Trong lúc chờ, bạn có thể dùng cách Dán văn bản.'; }
+    renderImport();
+  });
   renderImport();
 }
 function closeImport() { if (S.imp) S.imp.files.forEach(f => f.url && URL.revokeObjectURL(f.url)); S.imp = null; $('#modalHost').innerHTML = ''; }
@@ -2688,6 +2736,7 @@ function reviewHtml() {
 }
 async function impRunGrid() {
   const I = S.imp; I.error = '';
+  if (I.kind === 'auto') I.kind = 'assign';
   const rows = parseGridText(I.text);
   if (!rows.length) { I.error = 'Chưa có nội dung để đọc.'; renderImport(); return; }
   await impLoadWeek();
@@ -2711,6 +2760,11 @@ async function impRunAI(useText) {
     const out = await I.engine.call(aiPrompt(I.kind, useText), blobs);
     if (!S.imp || S.imp.token !== token) return;
     I.warnings = (out && out.warnings) || [];
+    if (I.kind === 'auto') {
+      const tp = out && out.type;
+      I.kind = ['assign', 'leave', 'ts', 'plan'].includes(tp) ? tp : out && out.flights ? 'plan' : (out && (out.rows || []).some(r => r.over_ngay != null || r.over_dem != null)) ? 'ts' : 'assign';
+      I.warnings.unshift('AI nhận biết đây là: ' + IMP_KINDS[I.kind].label);
+    }
     if (I.kind === 'plan') I.recs = planRecs((out && out.flights) || []);
     else if (I.kind === 'ts') I.recs = tsRecs(((out && out.rows) || []).map(r => ({ name: r.name, nameRaw: r.name_raw || r.name, day: r.day, over_ngay: r.over_ngay, over_dem: r.over_dem, bu_ngay: r.bu_ngay, bu_dem: r.bu_dem, confidence: r.confidence })));
     else I.recs = cellRecs(((out && out.rows) || []).map(r => ({ name: r.name, nameRaw: r.name_raw || r.name, cells: r.cells || {}, confidence: r.confidence })), I.kind);
@@ -2825,11 +2879,13 @@ document.addEventListener('change', async e => {
 }, true);
 function cfgAI() {
   if (!STANDALONE) return '<label><b>Đọc ảnh bằng AI</b><span>Trên trang này, ảnh được đọc bằng Claude, không cần cài đặt gì. Lần đầu dùng, trang sẽ hỏi quyền.</span><button class="btn pri" data-act="open-import">Nhập từ ảnh / văn bản…</button></label>';
-  const key = Store.lsGet('geminiKey') || '', model = Store.lsGet('geminiModel') || 'gemini-2.5-flash';
-  return '<label style="grid-column:1/-1"><b>Đọc ảnh bằng AI (Google Gemini, miễn phí)</b>' +
-    '<span>1) Mở <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>, đăng nhập Google, bấm <i>Create API key</i>. 2) Dán khoá vào ô dưới. Khoá chỉ lưu trên trình duyệt của máy này, không gửi lên Firebase. Mỗi người làm lịch tự dán trên máy mình.</span>' +
-    '<div class="bar" style="margin:6px 0"><input class="inp" id="gemKey" type="password" placeholder="AIza…" value="' + esc(key) + '" style="flex:1;min-width:200px"><input class="inp" id="gemModel" value="' + esc(model) + '" style="width:170px" aria-label="Model"><button class="btn pri" data-act="gem-save">Lưu khoá</button>' + (key ? '<button class="btn danger" data-act="gem-del">Xoá khoá</button>' : '') + '</div>' +
-    '<span class="muted">Lưu ý: ở gói miễn phí, Google có thể dùng nội dung gửi lên để cải thiện sản phẩm. Nếu ảnh có thông tin nhạy cảm, hãy cân nhắc hoặc dùng cách Dán văn bản.</span></label>';
+  const on = !!AIKEY.key;
+  return '<label style="grid-column:1/-1"><b>Đọc ảnh bằng AI · ' + (on ? '<span style="color:var(--ok)">✓ Đã bật cho tất cả người làm lịch</span>' : '<span style="color:var(--warn)">Chưa bật</span>') + '</b>' +
+    (on ? '<span>Bật bởi ' + esc(AIKEY.by || '?') + (AIKEY.at ? ' lúc ' + new Date(AIKEY.at).toLocaleString('vi-VN') : '') + ' · khoá …' + esc(AIKEY.key.slice(-4)) + ' · model ' + esc(AIKEY.model) + '. Mọi người làm lịch chỉ cần bấm 📷 Nhập từ ảnh, không phải cài gì.</span>' +
+      '<div class="bar" style="margin:6px 0"><button class="btn" data-act="gem-test">Kiểm tra khoá</button><button class="btn danger" data-act="gem-del">Tắt AI</button><button class="btn" data-act="gem-edit">Đổi khoá</button></div>' : '') +
+    '<div id="gemForm"' + (on ? ' hidden' : '') + '><span>Chỉ người quản lý làm <b>một lần</b> cho cả nhóm: (1) mở <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>, đăng nhập Google, bấm <i>Create API key</i>, chép khoá; (2) dán vào ô dưới, bấm Bật. Khoá được lưu trên Firebase, chỉ người làm lịch đọc được.</span>' +
+    '<div class="bar" style="margin:6px 0"><input class="inp" id="gemKey" type="password" placeholder="Dán khoá AIza…" style="flex:1;min-width:200px"><input class="inp" id="gemModel" value="' + esc(AIKEY.model) + '" style="width:170px" aria-label="Model"><button class="btn pri" data-act="gem-save">Bật cho cả nhóm</button></div></div>' +
+    '<span class="muted">Ở gói miễn phí, Google có thể dùng nội dung ảnh gửi lên để cải thiện sản phẩm. Nếu ảnh có thông tin nhạy cảm, dùng cách Dán văn bản.</span></label>';
 }
 
 boot();
