@@ -887,9 +887,19 @@ const Core = (() => {
     const raw = norm(text); if (!raw) return out;
     const whole = cm[key(raw)];
     if (whole) { out.status = whole.code; return out; }
-    if (/^OFF\s*1\/2/i.test(raw)) { out.status = /D$/i.test(raw) ? 'OFF1/2 + D' : 'OFF1/2 + S'; return out; }
-    let parts = raw.split(/\s*\+\s*|\s+-\s+/);
+    let rest = raw;
+    const mo = raw.match(/^OFF\s*1\/2\s*(?:\+\s*)?(LÀM\s+)?(S|D|SÁNG|SANG|ĐÊM|DEM)?(?=\s|\+|\(|$)\s*/i);
+    if (mo) {
+      const h = (mo[2] || '').toUpperCase();
+      out.status = /^(D|ĐÊM|DEM)$/.test(h) ? 'OFF1/2 + D' : 'OFF1/2 + S';
+      rest = raw.slice(mo[0].length).replace(/^\+\s*/, '');
+      if (!rest) return out;
+    }
+    rest = rest.replace(/OFF\s*1\/2\s*\+\s*(?:LÀM\s+)?(SÁNG|SANG|S)(?=\s|\+|\(|$)/ig, 'OFF1/2 S').replace(/OFF\s*1\/2\s*\+\s*(?:LÀM\s+)?(ĐÊM|DEM|D)(?=\s|\+|\(|$)/ig, 'OFF1/2 D').replace(/(SÁNG|SANG)\s*\+\s*OFF\s*1\/2/ig, 'OFF1/2 S').replace(/(ĐÊM|DEM)\s*\+\s*OFF\s*1\/2/ig, 'OFF1/2 D');
+    let parts = rest.split(/\s*\+\s*|\s+-\s+/);
     for (const p of parts) {
+      const oh = norm(p).match(/^OFF\s*1\/2\s*(LÀM\s+)?(S|D|SÁNG|SANG|ĐÊM|DEM)?$/i);
+      if (oh && !out.status) { const h = (oh[2] || '').toUpperCase(); out.status = /^(D|ĐÊM|DEM)$/.test(h) ? 'OFF1/2 + D' : 'OFF1/2 + S'; if (!h) out.note.push('(nửa ngày: chưa rõ sáng/đêm)'); continue; }
       const t = parseToken(p, cfg, cm);
       if (!t) continue;
       if (t.type === 'status' && !out.status) out.status = t.code;
@@ -2237,7 +2247,7 @@ document.addEventListener('click', async e => {
     case 'export-json': exportJson(); break;
     case 'open-import': openImport(t.dataset.k); break;
     case 'open-backups': openBackups(); break;
-    case 'gem-save': { const k = ($('#gemKey').value || '').trim(), m = ($('#gemModel').value || '').trim() || 'gemini-2.5-flash'; if (!/^(AIza[\w-]{20,}|AQ\.[\w.-]{20,})$/.test(k)) { toast('Khoá không đúng dạng (bắt đầu bằng AIza… hoặc AQ.…)'); break; } if (window.FIREBASE_CONFIG && k === window.FIREBASE_CONFIG.apiKey) { toast('Đây là khoá Firebase, không dùng được cho Gemini. Hãy tạo khoá riêng tại aistudio.google.com/apikey.'); break; } t.disabled = true; t.textContent = 'Đang kiểm tra…';
+    case 'gem-save': { const k = ($('#gemKey').value || '').trim(), m = ($('#gemModel').value || '').trim() || 'auto'; if (!/^(AIza[\w-]{20,}|AQ\.[\w.-]{20,})$/.test(k)) { toast('Khoá không đúng dạng (bắt đầu bằng AIza… hoặc AQ.…)'); break; } if (window.FIREBASE_CONFIG && k === window.FIREBASE_CONFIG.apiKey) { toast('Đây là khoá Firebase, không dùng được cho Gemini. Hãy tạo khoá riêng tại aistudio.google.com/apikey.'); break; } t.disabled = true; t.textContent = 'Đang kiểm tra…';
       try { await saveSharedKey(k, m); await testSharedKey(); toast('Đã bật AI cho tất cả người làm lịch'); } catch (e) { toast('Đã lưu khoá nhưng kiểm tra lỗi: ' + e.message); } render(); break; }
     case 'gem-test': t.disabled = true; try { await testSharedKey(); toast('Khoá hoạt động tốt'); } catch (e) { toast('Lỗi: ' + e.message); } t.disabled = false; break;
     case 'gem-edit': { const f = $('#gemForm'); if (f) f.hidden = false; break; }
@@ -2423,7 +2433,7 @@ function cellRecs(rowsIn, kind) {
       const text = C.norm(row.cells[k]); if (!text) continue;
       const pc = C.parseCell(text, S.cfg, cm);
       const r = { inc: true, nameRaw: row.nameRaw || row.name, sid: mt.id, score: mt.score, ambiguous: mt.ambiguous, d, src: text, status: pc.status || '', items: pc.items.map(i => i.slot + (i.role ? '/' + i.role : '') + (i.tag && i.tag !== 'LJ3-4' ? '/' + i.tag : '')).join(' + '), note: pc.note.join('; '), conf: row.confidence, warn: [] };
-      if (kind === 'leave') { r.items = ''; if (!r.status && !r.note) continue; }
+      if (kind === 'leave') { if (r.items) r.note = C.norm(['YC: ' + r.items, r.note].filter(Boolean).join('; ')); r.items = ''; if (!r.status && !r.note) continue; }
       recs.push(r);
     }
   }
@@ -2468,7 +2478,7 @@ function gridTsRecs(rows) {
 
 /* ---------- AI đọc ảnh / văn bản ---------- */
 // Khoá AI dùng chung: người quản lý dán MỘT lần, lưu trên Firebase (chỉ người làm lịch đọc được)
-const AIKEY = { loaded: false, key: '', model: 'gemini-2.5-flash', by: '', at: '' };
+const AIKEY = { loaded: false, key: '', model: 'auto', by: '', at: '' };
 async function loadSharedKey(force) {
   if (AIKEY.loaded && !force) return AIKEY;
   AIKEY.loaded = true; AIKEY.key = ''; AIKEY.by = '';
@@ -2478,7 +2488,7 @@ async function loadSharedKey(force) {
   return AIKEY;
 }
 async function saveSharedKey(key, model) {
-  model = model || 'gemini-2.5-flash';
+  model = model || 'auto';
   if (Store.mode === 'fb') await FBX.fs.doc('secrets/ai').set({ geminiKey: key, model, by: FBX.user ? FBX.user.email : '', at: new Date().toISOString() });
   else { Store.lsSet('geminiKey', key); Store.lsSet('geminiModel', model); }
   await loadSharedKey(true);
@@ -2506,29 +2516,67 @@ async function aiEngine() {
     return { name: 'Claude', images: !!(lim && lim.images), pdf: false, call: async (prompt, blobs) => sm.json(prompt, Object.assign({ modelTier: 'default', cache: false }, blobs.length ? { images: blobs } : {})) };
   }
   const k = await loadSharedKey(); if (!k.key) return null;
-  const key = k.key, model = k.model || 'gemini-2.5-flash';
-  return { name: 'Gemini · ' + model, images: true, pdf: true, call: async (prompt, blobs) => {
-    const parts = [{ text: prompt }];
-    for (const b of blobs) parts.push({ inline_data: { mime_type: b.type || 'image/jpeg', data: await blobB64(b) } });
+  const key = k.key;
+  const fix = 'Cách sửa: vào aistudio.google.com/apikey, bấm "Create API key", chép khoá mới (dạng AQ.…), rồi dán ở Cài đặt → Đọc ảnh bằng AI → Đổi khoá. Nếu khoá cũ hiện chữ "Blocked" trong AI Studio thì xoá nó đi.';
+  const authErr = (st, t) => {
+    if (st === 400 && /API key/i.test(t)) return new Error('Khoá API Gemini không đúng. ' + fix);
+    if (/^AIza/.test(key) && (st === 401 || st === 403)) return new Error('Google không còn nhận khoá dạng "AIza…" cho Gemini (lỗi ' + st + '). ' + fix);
+    if (st === 401 || st === 403) return new Error('Google từ chối khoá (lỗi ' + st + (/blocked/i.test(t) ? ', khoá bị chặn' : '') + '). ' + fix);
+    return null;
+  };
+  const call1 = async (model, parts) => {
     const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent', {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
       body: JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig: { responseMimeType: 'application/json', temperature: 0 } })
     });
-    if (!r.ok) {
-      const t = await r.text().catch(() => '');
-      if (r.status === 400 && /API key/i.test(t)) throw new Error('Khoá API Gemini không đúng. Kiểm tra lại ở Cài đặt → Nhập / xuất dữ liệu.');
-      const fix = 'Cách sửa: vào aistudio.google.com/apikey, bấm "Create API key", chép khoá mới (dạng AQ.…), rồi dán ở Cài đặt → Đọc ảnh bằng AI → Đổi khoá. Nếu khoá cũ hiện chữ "Blocked" trong AI Studio thì xoá nó đi.';
-      if (/^AIza/.test(key) && (r.status === 401 || r.status === 403)) throw new Error('Google không còn nhận khoá dạng "AIza…" cho Gemini (lỗi ' + r.status + '). ' + fix);
-      if (r.status === 401 || r.status === 403) throw new Error('Google từ chối khoá (lỗi ' + r.status + (/blocked/i.test(t) ? ', khoá bị chặn' : '') + '). ' + fix);
-      if (r.status === 429) throw new Error('Đã hết lượt dùng miễn phí của Gemini trong lúc này. Đợi vài phút rồi thử lại.');
-      if (r.status === 404) throw new Error('Không có model "' + model + '". Sửa tên model ở Cài đặt → Nhập / xuất dữ liệu.');
-      throw new Error('Gemini báo lỗi ' + r.status + ': ' + t.slice(0, 200));
+    if (!r.ok) { const t = await r.text().catch(() => ''); return { st: r.status, t }; }
+    return { ok: true, j: await r.json() };
+  };
+  return { name: 'Gemini · ' + (k.model && k.model !== 'auto' ? k.model : 'tự chọn model'), images: true, pdf: true, call: async (prompt, blobs) => {
+    const parts = [{ text: prompt }];
+    for (const b of blobs) parts.push({ inline_data: { mime_type: b.type || 'image/jpeg', data: await blobB64(b) } });
+    // thử model đã lưu trước; nếu không có (404) hoặc hết lượt (429) thì tự tìm model khác còn dùng được
+    let list = k.model && k.model !== 'auto' ? [k.model] : [];
+    let discovered = false, last = null;
+    for (let i = 0; i < 8; i++) {
+      if (i >= list.length) {
+        if (discovered) break;
+        discovered = true;
+        const more = (await listGeminiModels(key, authErr)).filter(m => !list.includes(m));
+        list = list.concat(more);
+        if (i >= list.length) break;
+      }
+      const model = list[i];
+      const res = await call1(model, parts);
+      if (res.ok) {
+        if (model !== k.model) { try { await saveSharedKey(key, model); } catch (e) {} }
+        const j = res.j;
+        const cand = (j.candidates || [])[0];
+        const txt = cand && cand.content ? (cand.content.parts || []).filter(p => !p.thought).map(p => p.text || '').join('') : '';
+        if (!txt) throw new Error('AI không trả về nội dung' + (j.promptFeedback && j.promptFeedback.blockReason ? ' (' + j.promptFeedback.blockReason + ')' : '') + '.');
+        return JSON.parse(txt.replace(/^```(json)?/i, '').replace(/```\s*$/, '').trim());
+      }
+      const ae = authErr(res.st, res.t); if (ae) throw ae;
+      last = res;
+      if (res.st === 404 || res.st === 429 || (res.st === 400 && /not (found|supported)|unsupported|model/i.test(res.t))) continue;
+      throw new Error('Gemini báo lỗi ' + res.st + ': ' + res.t.slice(0, 200));
     }
-    const j = await r.json();
-    const txt = ((j.candidates || [])[0] || {}).content ? j.candidates[0].content.parts.map(p => p.text || '').join('') : '';
-    if (!txt) throw new Error('AI không trả về nội dung' + (j.promptFeedback && j.promptFeedback.blockReason ? ' (' + j.promptFeedback.blockReason + ')' : '') + '.');
-    return JSON.parse(txt.replace(/^```(json)?/i, '').replace(/```\s*$/, '').trim());
+    if (last && last.st === 429) throw new Error('Đã hết lượt dùng miễn phí của Gemini trong lúc này. Đợi vài phút rồi thử lại.');
+    throw new Error('Không tìm được model Gemini nào dùng được với khoá này' + (last ? ' (lỗi ' + last.st + ')' : '') + '.');
   } };
+}
+// lấy danh sách model khoá này được dùng, ưu tiên bản Flash mới nhất (nhanh, có gói miễn phí)
+async function listGeminiModels(key, authErr) {
+  const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200', { headers: { 'x-goog-api-key': key } });
+  if (!r.ok) { const t = await r.text().catch(() => ''); const ae = authErr(r.status, t); if (ae) throw ae; throw new Error('Không lấy được danh sách model (lỗi ' + r.status + ').'); }
+  const j = await r.json();
+  const names = (j.models || []).filter(m => (m.supportedGenerationMethods || []).includes('generateContent')).map(m => String(m.name).replace(/^models\//, ''))
+    .filter(n => /^gemini-/.test(n) && !/(image|tts|live|audio|embed|robotics|computer|native|exp)/i.test(n));
+  const ver = n => { const m = n.match(/gemini-(\d+)(?:\.(\d+))?/); return m ? +m[1] + (+(m[2] || 0)) / 100 : 0; };
+  const tier = n => /flash-lite/.test(n) ? 2 : /flash/.test(n) ? 3 : /pro/.test(n) ? 1 : 0;
+  const pre = n => /preview|latest/.test(n) ? 1 : 0;
+  names.sort((a, b) => tier(b) - tier(a) || pre(a) - pre(b) || ver(b) - ver(a) || a.length - b.length);
+  return names;
 }
 function blobB64(b) { return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = rej; r.readAsDataURL(b); }); }
 async function prepImage(file, rot) {
@@ -2552,6 +2600,10 @@ function aiPrompt(kind, hasText) {
     'Tuần: ' + days + '.\nDanh sách nhân viên (tên chuẩn): ' + staff + '.\n' +
     'Mã slot chuyến bay: ' + slots + '. Sau mã có thể có vị trí /S (supervisor), /C, /G, /GC, /SE. Một ô có thể có 2 chuyến nối bằng dấu +.\n' +
     'Mã trạng thái: ' + codes + '.\n\n' +
+    'Tài liệu hay gặp là SỔ ĐĂNG KÝ NGHỈ / NGUYỆN VỌNG viết tay: mỗi mục dạng "số. Tên { ngày/tháng: nội dung }". Ngày ghi dạng 9/10, 10/10 → đổi sang thứ theo bảng tuần ở trên; "5/10 - 6/10: NP" nghĩa là NP cả hai ngày. Chữ bị gạch ngang thì BỎ QUA. ' +
+    'Chuẩn hoá cách viết tắt: "0 đêm", "ko đêm", "k° đêm", "kđ", "không đêm" → "K Đ"; "off 1/2 + sáng", "sáng + off 1/2" → "OFF1/2 + S"; "off 1/2 + đêm", "off 1/2 làm đêm" → "OFF1/2 + D"; "off" → "OFF"; "np", "nghỉ phép" → "NP". ' +
+    'Chuyến bay ghi như "FD3+AK3", "Z2", "EK", "BX" thì giữ mã slot (BX đêm trễ → BX1). Các ý khác (làm khuya, đêm muộn, ko chiều 16h-18h, đi Sài Gòn sớm, đám giỗ, ko FD4…) để trong ngoặc đơn sau mã, ví dụ "K Đ (ko FD4)". ' +
+    'Tên thường viết tắt (BTrâm = BÍCH TRÂM, A.Vũ = ANH VŨ, H.Nhi = HƯƠNG NHI, N Quỳnh = NGỰ QUỲNH) hoặc kèm số (Thảo 4, Ngọc 5): chọn tên chuẩn gần nhất. Người không ghi gì thì bỏ qua.\n' +
     'Quy tắc: chép đúng những gì nhìn thấy, không tự bịa thêm. Ô trống thì bỏ qua. Chữ không đọc được thì ghi dấu ? vào chỗ đó và hạ confidence. ' +
     '"name" là tên chuẩn gần nhất trong danh sách (để trống nếu không chắc), "name_raw" là tên đúng như viết trong tài liệu. confidence từ 0 đến 1.\n';
   if (kind === 'auto') p += 'Nhiệm vụ: trước hết xác định tài liệu là loại nào: "assign" (bảng phân ca theo người và ngày, có chuyến và/hoặc trạng thái), "leave" (chỉ danh sách nghỉ OFF/NP/ốm), "ts" (chấm công OVER/BÙ, số phút hoặc giờ), "plan" (lịch bay: số hiệu chuyến, giờ, CANX). ' +
