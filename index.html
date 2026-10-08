@@ -2517,11 +2517,9 @@ async function aiEngine() {
     if (!r.ok) {
       const t = await r.text().catch(() => '');
       if (r.status === 400 && /API key/i.test(t)) throw new Error('Khoá API Gemini không đúng. Kiểm tra lại ở Cài đặt → Nhập / xuất dữ liệu.');
-      const aqHelp = 'Khoá dạng "AQ." mới của Google AI Studio hiện hay bị lỗi khi gọi từ trang web. Hãy tạo khoá dạng "AIza…" trong Google Cloud Console: APIs & Services → Library → bật "Generative Language API" → Credentials → Create credentials → API key, rồi dán lại ở Cài đặt → Đọc ảnh bằng AI → Đổi khoá.';
-      if (/^AQ\./.test(key) && (r.status === 401 || r.status === 403)) throw new Error('Google từ chối khoá (lỗi ' + r.status + '). ' + aqHelp);
-      if (r.status === 401) throw new Error('Google từ chối khoá (401). ' + aqHelp);
-      if (r.status === 403 && /blocked|API_KEY_SERVICE_BLOCKED/i.test(t)) throw new Error('Khoá này bị chặn dùng Gemini (thường do dán nhầm khoá Firebase, hoặc khoá có giới hạn API). Hãy tạo khoá MỚI tại aistudio.google.com/apikey → Create API key → chọn "Create API key in new project", rồi dán lại ở Cài đặt → Đọc ảnh bằng AI → Đổi khoá.');
-      if (r.status === 403 && /SERVICE_DISABLED|has not been used|disabled/i.test(t)) throw new Error('Dự án của khoá chưa bật Gemini API. Tạo khoá mới tại aistudio.google.com/apikey (chọn "Create API key in new project") rồi dán lại.');
+      const fix = 'Cách sửa: vào aistudio.google.com/apikey, bấm "Create API key", chép khoá mới (dạng AQ.…), rồi dán ở Cài đặt → Đọc ảnh bằng AI → Đổi khoá. Nếu khoá cũ hiện chữ "Blocked" trong AI Studio thì xoá nó đi.';
+      if (/^AIza/.test(key) && (r.status === 401 || r.status === 403)) throw new Error('Google không còn nhận khoá dạng "AIza…" cho Gemini (lỗi ' + r.status + '). ' + fix);
+      if (r.status === 401 || r.status === 403) throw new Error('Google từ chối khoá (lỗi ' + r.status + (/blocked/i.test(t) ? ', khoá bị chặn' : '') + '). ' + fix);
       if (r.status === 429) throw new Error('Đã hết lượt dùng miễn phí của Gemini trong lúc này. Đợi vài phút rồi thử lại.');
       if (r.status === 404) throw new Error('Không có model "' + model + '". Sửa tên model ở Cài đặt → Nhập / xuất dữ liệu.');
       throw new Error('Gemini báo lỗi ' + r.status + ': ' + t.slice(0, 200));
@@ -2889,7 +2887,7 @@ function cfgAI() {
     (on ? '<span>Bật bởi ' + esc(AIKEY.by || '?') + (AIKEY.at ? ' lúc ' + new Date(AIKEY.at).toLocaleString('vi-VN') : '') + ' · khoá …' + esc(AIKEY.key.slice(-4)) + ' · model ' + esc(AIKEY.model) + '. Mọi người làm lịch chỉ cần bấm 📷 Nhập từ ảnh, không phải cài gì.</span>' +
       '<div class="bar" style="margin:6px 0"><button class="btn" data-act="gem-test">Kiểm tra khoá</button><button class="btn danger" data-act="gem-del">Tắt AI</button><button class="btn" data-act="gem-edit">Đổi khoá</button></div>' : '') +
     '<div id="gemForm"' + (on ? ' hidden' : '') + '><span>Chỉ người quản lý làm <b>một lần</b> cho cả nhóm: (1) mở <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>, đăng nhập Google, bấm <i>Create API key</i>, chép khoá; (2) dán vào ô dưới, bấm Bật. Khoá được lưu trên Firebase, chỉ người làm lịch đọc được.</span>' +
-    '<div class="bar" style="margin:6px 0"><input class="inp" id="gemKey" type="password" placeholder="Dán khoá AIza…" style="flex:1;min-width:200px"><input class="inp" id="gemModel" value="' + esc(AIKEY.model) + '" style="width:170px" aria-label="Model"><button class="btn pri" data-act="gem-save">Bật cho cả nhóm</button></div></div>' +
+    '<div class="bar" style="margin:6px 0"><input class="inp" id="gemKey" type="password" placeholder="Dán khoá AQ.… (tạo ở AI Studio)" style="flex:1;min-width:200px"><input class="inp" id="gemModel" value="' + esc(AIKEY.model) + '" style="width:170px" aria-label="Model"><button class="btn pri" data-act="gem-save">Bật cho cả nhóm</button></div></div>' +
     '<span class="muted">Ở gói miễn phí, Google có thể dùng nội dung ảnh gửi lên để cải thiện sản phẩm. Nếu ảnh có thông tin nhạy cảm, dùng cách Dán văn bản.</span></label>';
 }
 
