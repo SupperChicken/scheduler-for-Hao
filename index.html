@@ -2546,9 +2546,11 @@ async function aiEngine() {
     const parts = [{ text: prompt }];
     for (const b of blobs) parts.push({ inline_data: { mime_type: b.type || 'image/jpeg', data: await blobB64(b) } });
     // thử model đã lưu trước; nếu không có (404) hoặc hết lượt (429) thì tự tìm model khác còn dùng được
-    let list = k.model && k.model !== 'auto' ? [k.model] : [];
-    let discovered = false, last = null, retried = false;
-    for (let i = 0; i < 8; i++) {
+    let list = [AIKEY.session, k.model].filter((m, i, arr) => m && m !== 'auto' && arr.indexOf(m) === i);
+    let discovered = false, last = null, attempt = 0, stale = !(k.model && k.model !== 'auto');
+    const note = m => { try { S.imp && S.imp.onNote && S.imp.onNote(m); } catch (e) {} };
+    const busy = st => st === 429 || st === 500 || st === 502 || st === 503 || st === 504;
+    for (let i = 0; i < 12; i++) {
       if (i >= list.length) {
         if (discovered) break;
         discovered = true;
@@ -2559,7 +2561,9 @@ async function aiEngine() {
       const model = list[i];
       const res = await call1(model, parts);
       if (res.ok) {
-        if (model !== k.model) { try { await saveSharedKey(key, model); } catch (e) {} }
+        // chỉ đổi model mặc định khi model cũ không còn (404), không đổi vì quá tải tạm thời
+        AIKEY.session = model; // dùng tiếp model này cho các ảnh sau trong phiên
+        if (model !== k.model && stale) { try { await saveSharedKey(key, model); } catch (e) {} }
         const j = res.j;
         const cand = (j.candidates || [])[0];
         const txt = cand && cand.content ? (cand.content.parts || []).filter(p => !p.thought).map(p => p.text || '').join('') : '';
@@ -2568,11 +2572,20 @@ async function aiEngine() {
       }
       const ae = authErr(res.st, res.t); if (ae) throw ae;
       last = res;
-      if (res.st >= 500 && !retried) { retried = true; i--; await new Promise(r => setTimeout(r, 2500)); continue; }
-      if (res.st === 404 || res.st === 429 || (res.st === 400 && /not (found|supported)|unsupported|model/i.test(res.t))) continue;
+      if (busy(res.st)) {
+        if (attempt < 2) {
+          attempt++; const wait = attempt === 1 ? 5 : 12;
+          note('Gemini (' + model + ') đang quá tải, tự thử lại sau ' + wait + ' giây… (lần ' + (attempt + 1) + '/3)');
+          await new Promise(r => setTimeout(r, wait * 1000)); i--; continue;
+        }
+        attempt = 0; note('Model ' + model + ' vẫn quá tải, chuyển sang model khác…'); continue;
+      }
+      attempt = 0;
+      if (res.st === 404 || (res.st === 400 && /not (found|supported)|unsupported|model/i.test(res.t))) { if (model === k.model) stale = true; if (model === AIKEY.session) AIKEY.session = ''; continue; }
       throw new Error('Gemini báo lỗi ' + res.st + ': ' + res.t.slice(0, 200));
     }
     if (last && last.st === 429) throw new Error('Đã hết lượt dùng miễn phí của Gemini trong lúc này. Đợi vài phút rồi thử lại.');
+    if (last && busy(last.st)) throw new Error('Máy chủ Gemini của Google đang quá tải (lỗi ' + last.st + '). Đây là lỗi tạm thời phía Google, trang đã tự thử lại nhiều lần. Đợi vài phút rồi bấm "Đọc lại ảnh lỗi".');
     throw new Error('Không tìm được model Gemini nào dùng được với khoá này' + (last ? ' (lỗi ' + last.st + ')' : '') + '.');
   } };
 }
@@ -2768,6 +2781,7 @@ function reviewHtml() {
   let h = '<div class="revtop">';
   if (I.files.length) h += '<div class="revimgs">' + I.files.map(f => f.pdf ? '<div class="pdf">PDF ' + esc(f.name) + '</div>' : '<a href="' + f.url + '" target="_blank" rel="noopener"><img src="' + f.url + '" alt="Ảnh gốc" style="transform:rotate(' + f.rot + 'deg)"></a>').join('') + '<span class="help">Bấm ảnh để mở lớn, đối chiếu từng dòng.</span></div>';
   h += '<div class="revsum"><div class="kpis" style="margin:0"><div class="kpi"><div class="k">Dòng đọc được</div><div class="v">' + recs.length + '</div></div><div class="kpi ' + (issues ? 'warn' : 'ok') + '"><div class="k">Cần xem lại</div><div class="v">' + issues + '</div></div>' + (I.kind !== 'plan' ? '<div class="kpi ' + (unmatched ? 'err' : 'ok') + '"><div class="k">Chưa khớp tên</div><div class="v">' + unmatched + '</div></div>' : '') + '</div>' +
+    (I.failed && I.failed.length ? '<div class="issue" style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">Còn ' + I.failed.length + ' ảnh chưa đọc được (ảnh ' + I.failed.map(i => i + 1).join(', ') + '). <button class="btn sm" data-iact="retry-failed">Đọc lại ảnh lỗi</button></div>' : '') +
     (I.warnings.length ? '<div class="issue warn" style="margin-top:8px">AI ghi chú: ' + esc(I.warnings.join(' · ')) + '</div>' : '') +
     '<div class="bar" style="margin:10px 0 0"><label class="chk"><input type="checkbox" id="impOnly"' + (I.onlyIssues ? ' checked' : '') + '> Chỉ hiện dòng cần xem lại</label>' +
     (I.kind === 'assign' ? '<span class="muted" style="font-size:12.5px">Cách ghi:</span><select class="sel sm" id="impMode"><option value="replace"' + (I.mode === 'replace' ? ' selected' : '') + '>Ghi đè ô (thay chuyến và trạng thái)</option><option value="merge"' + (I.mode === 'merge' ? ' selected' : '') + '>Bổ sung (giữ chuyến đang có)</option></select>' : '') +
@@ -2814,13 +2828,15 @@ async function impLoadWeek() {
   const I = S.imp;
   I.wk = I.week === S.week.start ? S.week : (await Store.getWeek(I.week)) || S.week;
 }
-async function impRunAI(useText) {
+async function impRunAI(useText, only) {
   const I = S.imp; I.error = '';
   if (!I.engine) { I.error = 'Chưa bật AI.'; renderImport(); return; }
   if (useText && !C.norm(I.text)) { I.error = 'Chưa có nội dung để đọc.'; renderImport(); return; }
   const token = I.token = Math.random();
+  const prev = only ? { recs: I.recs, kind: I.kind, warnings: I.warnings } : null;
   I.step = 'busy'; I.busyStart = Date.now(); I.busyLog = [];
   const setMsg = m => { I.busyMsg = m; const el = $('#busyMsg'); if (el) el.textContent = m; else renderImport(); };
+  I.onNote = m => setMsg(m);
   renderImport();
   clearInterval(I.tick); I.tick = setInterval(() => { const el = $('#busyT'); if (el && S.imp && S.imp.busyStart) el.textContent = Math.round((Date.now() - S.imp.busyStart) / 1000) + ' giây'; else clearInterval(I.tick); }, 1000);
   try {
@@ -2831,8 +2847,9 @@ async function impRunAI(useText) {
       outs.push(await I.engine.call(aiPrompt(I.kind, true), []));
     } else {
       // đọc TỪNG ảnh một: nhanh hơn, thấy tiến độ, ảnh lỗi không làm hỏng ảnh khác
-      const n = I.files.length;
-      for (let i = 0; i < n; i++) {
+      const idxs = only && only.length ? only : I.files.map((_, i) => i);
+      const n = I.files.length; I.failed = [];
+      for (const i of idxs) {
         if (!S.imp || S.imp.token !== token) return;
         setMsg('Đang đọc ảnh ' + (i + 1) + '/' + n + ' bằng ' + I.engine.name + '… mỗi ảnh thường 15–60 giây.');
         const t0 = Date.now();
@@ -2844,8 +2861,8 @@ async function impRunAI(useText) {
           I.busyLog.push('✓ Ảnh ' + (i + 1) + ': đọc được ' + cnt + ' dòng (' + Math.round((Date.now() - t0) / 1000) + ' giây)');
         } catch (e) {
           if (!S.imp || S.imp.token !== token) return;
-          I.busyLog.push('✗ Ảnh ' + (i + 1) + ': ' + ((e && e.message) || e));
-          if (/khoá|từ chối|AQ\.|AIza|hết lượt|model/i.test(String(e && e.message))) throw e; // lỗi chung, dừng luôn
+          I.busyLog.push('✗ Ảnh ' + (i + 1) + ': ' + ((e && e.message) || e)); I.failed.push(i);
+          if (/khoá|từ chối/i.test(String(e && e.message))) throw e; // lỗi khoá: dừng luôn
         }
         if (S.imp && S.imp.token === token) renderImport();
       }
@@ -2857,6 +2874,7 @@ async function impRunAI(useText) {
     I.warnings = [];
     outs.forEach((o, i) => ((o && o.warnings) || []).forEach(w => I.warnings.push((outs.length > 1 ? 'Ảnh ' + (i + 1) + ': ' : '') + w)));
     I.busyLog.filter(x => x[0] === '✗').forEach(x => I.warnings.push(x.slice(2)));
+    if (prev) I.kind = prev.kind;
     if (I.kind === 'auto') {
       const votes = {}; outs.forEach(o => { const t = pick(o); votes[t] = (votes[t] || 0) + 1; });
       I.kind = Object.keys(votes).sort((a, b) => votes[b] - votes[a])[0];
@@ -2867,12 +2885,13 @@ async function impRunAI(useText) {
     if (I.kind === 'plan') I.recs = planRecs([].concat(...outs.map(o => (o && o.flights) || [])));
     else if (I.kind === 'ts') I.recs = tsRecs(rows.map(r => ({ name: r.name, nameRaw: r.name_raw || r.name, day: r.day, over_ngay: r.over_ngay, over_dem: r.over_dem, bu_ngay: r.bu_ngay, bu_dem: r.bu_dem, confidence: r.confidence })));
     else I.recs = cellRecs(rows.map(r => ({ name: r.name, nameRaw: r.name_raw || r.name, cells: r.cells || {}, confidence: r.confidence })), I.kind);
+    if (prev) { I.recs = prev.recs.concat(I.recs); I.warnings = prev.warnings.filter(w => !/^Ảnh \d+: |quá tải|lỗi 5\d\d/.test(w)).concat(I.warnings); }
     I.step = 'review';
   } catch (e) {
     if (!S.imp || S.imp.token !== token) return;
     I.step = 'source';
     I.error = e && e.code === 'not_granted' ? 'Bạn chưa cho phép trang dùng Claude đọc ảnh.' : e && e.code === 'rate_limited' ? 'Đang bị giới hạn lượt, thử lại sau ít phút.' : 'Không đọc được: ' + ((e && e.message) || e);
-  } finally { if (S.imp) { S.imp.busyStart = null; clearInterval(S.imp.tick); } }
+  } finally { if (S.imp) { S.imp.busyStart = null; clearInterval(S.imp.tick); S.imp.onNote = null; } }
   renderImport();
 }
 function impConfirm() {
@@ -2951,6 +2970,7 @@ document.addEventListener('click', e => {
   else if (a === 'back') { I.step = 'source'; }
   else if (a === 'all') { I.recs.forEach(r => r.inc = t.dataset.v === '1'); I.keepScroll = true; }
   else if (a === 'confirm') { impConfirm(); return; }
+  else if (a === 'retry-failed') { impRunAI(false, I.failed.slice()); return; }
   renderImport();
 });
 document.addEventListener('change', async e => {
