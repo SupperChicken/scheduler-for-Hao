@@ -1,5 +1,7 @@
 # Phân Ca Sân Bay
 
+**Tác giả và bản quyền:** © 2026 ThienNV · thiennv@vnpt-technology.vn · 0888.99.33.00
+
 Công cụ chia lịch và chấm công cho nhân viên phục vụ chuyến bay.
 
 - **Giao diện:** đăng trên GitHub Pages (miễn phí).
@@ -116,3 +118,7 @@ Mỗi tuần lịch chiếm khoảng 150 KB, nên 1 GB đủ cho hàng nghìn tu
 | "Chưa được cấp quyền" | Email chưa có trong *Quyền truy cập*. Với chủ dự án: kiểm tra email ở dòng `OWNERS` và đã bấm *Publish* luật chưa |
 | "Bạn không có quyền sửa" | Tài khoản này là *Người xem* |
 | Sửa xong GitHub mà trang chưa đổi | Đợi 1–2 phút rồi tải lại trang (Ctrl+F5) |
+
+---
+
+© 2026 ThienNV · thiennv@vnpt-technology.vn · 0888.99.33.00. Mọi quyền được bảo lưu.
