@@ -2237,7 +2237,7 @@ document.addEventListener('click', async e => {
     case 'export-json': exportJson(); break;
     case 'open-import': openImport(t.dataset.k); break;
     case 'open-backups': openBackups(); break;
-    case 'gem-save': { const k = ($('#gemKey').value || '').trim(), m = ($('#gemModel').value || '').trim() || 'gemini-2.5-flash'; if (!/^AIza[\w-]{20,}$/.test(k)) { toast('Khoá không đúng dạng (bắt đầu bằng AIza…)'); break; } t.disabled = true; t.textContent = 'Đang kiểm tra…';
+    case 'gem-save': { const k = ($('#gemKey').value || '').trim(), m = ($('#gemModel').value || '').trim() || 'gemini-2.5-flash'; if (!/^AIza[\w-]{20,}$/.test(k)) { toast('Khoá không đúng dạng (bắt đầu bằng AIza…)'); break; } if (window.FIREBASE_CONFIG && k === window.FIREBASE_CONFIG.apiKey) { toast('Đây là khoá Firebase, không dùng được cho Gemini. Hãy tạo khoá riêng tại aistudio.google.com/apikey.'); break; } t.disabled = true; t.textContent = 'Đang kiểm tra…';
       try { await saveSharedKey(k, m); await testSharedKey(); toast('Đã bật AI cho tất cả người làm lịch'); } catch (e) { toast('Đã lưu khoá nhưng kiểm tra lỗi: ' + e.message); } render(); break; }
     case 'gem-test': t.disabled = true; try { await testSharedKey(); toast('Khoá hoạt động tốt'); } catch (e) { toast('Lỗi: ' + e.message); } t.disabled = false; break;
     case 'gem-edit': { const f = $('#gemForm'); if (f) f.hidden = false; break; }
@@ -2517,6 +2517,8 @@ async function aiEngine() {
     if (!r.ok) {
       const t = await r.text().catch(() => '');
       if (r.status === 400 && /API key/i.test(t)) throw new Error('Khoá API Gemini không đúng. Kiểm tra lại ở Cài đặt → Nhập / xuất dữ liệu.');
+      if (r.status === 403 && /blocked|API_KEY_SERVICE_BLOCKED/i.test(t)) throw new Error('Khoá này bị chặn dùng Gemini (thường do dán nhầm khoá Firebase, hoặc khoá có giới hạn API). Hãy tạo khoá MỚI tại aistudio.google.com/apikey → Create API key → chọn "Create API key in new project", rồi dán lại ở Cài đặt → Đọc ảnh bằng AI → Đổi khoá.');
+      if (r.status === 403 && /SERVICE_DISABLED|has not been used|disabled/i.test(t)) throw new Error('Dự án của khoá chưa bật Gemini API. Tạo khoá mới tại aistudio.google.com/apikey (chọn "Create API key in new project") rồi dán lại.');
       if (r.status === 429) throw new Error('Đã hết lượt dùng miễn phí của Gemini trong lúc này. Đợi vài phút rồi thử lại.');
       if (r.status === 404) throw new Error('Không có model "' + model + '". Sửa tên model ở Cài đặt → Nhập / xuất dữ liệu.');
       throw new Error('Gemini báo lỗi ' + r.status + ': ' + t.slice(0, 200));
