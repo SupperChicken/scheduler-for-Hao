@@ -73,6 +73,38 @@ td.lvc.k-off{background:var(--offSoft)} td.lvc.k-leave{background:var(--leaveSof
 td.lvc.autoff select{border-style:dashed}
 .copy{padding-inline:16px;padding-block:10px calc(10px + env(safe-area-inset-bottom,0px));border-top:1px solid var(--line);background:var(--panel);color:var(--ink2);font-size:12px;text-align:center;user-select:text}
 .copy b{color:var(--ink)}
+
+/* trình nhập dữ liệu */
+.modal .box.wiz{width:min(1200px,100%);max-height:94vh;height:94vh;padding:0;display:flex;flex-direction:column}
+.whead{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--line)}
+.whead h3{margin:0;font-size:16px}
+.wbody{flex:1;overflow:auto;padding:14px 18px;display:flex;flex-direction:column;gap:10px;min-height:0}
+.wbody h4{margin:4px 0 6px;font-size:11.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--mute)}
+.wfoot{display:flex;gap:8px;align-items:center;justify-content:flex-end;flex-wrap:wrap;padding:12px 18px;border-top:1px solid var(--line);padding-bottom:calc(12px + env(safe-area-inset-bottom,0px))}
+.wgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}
+.seg.wrap{flex-wrap:wrap}
+.srcs{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px}
+.src{text-align:left;border:1px solid var(--line);background:var(--panel);border-radius:10px;padding:10px 12px;cursor:pointer;display:flex;flex-direction:column;gap:3px}
+.src span{font-size:12px;color:var(--ink2)}
+.src.on{border-color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink);background:var(--panel2)}
+.drop{display:flex;flex-direction:column;gap:4px;border:2px dashed var(--line);border-radius:10px;padding:16px;cursor:pointer;background:var(--panel2)}
+.drop span{font-size:12.5px;color:var(--ink2)}
+.drop input{margin-top:6px;max-width:100%}
+.aibox{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.thumbs{display:flex;gap:10px;flex-wrap:wrap}
+.th{width:160px}
+.th img{width:160px;height:160px;object-fit:contain;background:var(--panel2);border:1px solid var(--line);border-radius:8px}
+.pdf{width:160px;height:110px;display:grid;place-items:center;text-align:center;background:var(--panel2);border:1px solid var(--line);border-radius:8px;font-size:12px;overflow:hidden}
+.revtop{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start}
+.revimgs{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;max-width:100%}
+.revimgs img{height:150px;max-width:260px;object-fit:contain;border:1px solid var(--line);border-radius:8px;background:var(--panel2)}
+.revsum{flex:1;min-width:260px}
+table.rev td{vertical-align:middle}
+table.rev tr.off td{opacity:.45}
+table.rev tr.wr td:last-child{background:var(--warnSoft)}
+table.rev .meta{font-size:11px;color:var(--mute);max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+table.rev .why{font-size:11.5px;color:var(--warn)}
+.okc{color:var(--ok);font-weight:700}
 .issue.okk{background:var(--okSoft);color:var(--ok)}
 
 .ro td.cell{cursor:default}
@@ -281,6 +313,7 @@ td.c{text-align:center}
     <div class="spacer"></div>
     <button class="tbtn edit-only" data-act="undo" id="bUndo" title="Hoàn tác (Ctrl+Z)">↶ Hoàn tác</button>
     <button class="tbtn edit-only" data-act="redo" id="bRedo" title="Làm lại (Ctrl+Y)">↷</button>
+    <button class="tbtn edit-only" data-act="open-import">⇪ Nhập dữ liệu</button>
     <button class="tbtn pri edit-only" data-act="auto">Tự động chia</button>
     <div class="userbox" id="userBox"></div>
     <div class="save" id="saveSt"><span class="dot busy"></span><span>Đang kết nối…</span></div>
@@ -1510,6 +1543,7 @@ function viewRoster() {
     '<label class="chk"><input type="checkbox" id="ffoot"' + (S.showFoot ? ' checked' : '') + '> Đếm quân số cuối bảng</label>' +
     (S.showFoot ? '<button class="btn sm" data-act="go-foot">↓ Xuống bảng đếm</button>' : '') +
     '<span class="spacer"></span>' +
+    '<button class="btn edit-only" data-act="open-import" data-k="assign">Nhập từ ảnh / văn bản</button>' +
     '<button class="btn edit-only" data-act="lock-all">Khoá phân công hiện có</button>' +
     '<button class="btn edit-only" data-act="clear-auto">Xoá phân công chưa khoá</button>' +
     '<button class="btn" data-act="export-xlsx">Xuất Excel</button></div>';
@@ -1601,7 +1635,7 @@ function viewLeave() {
   const per = [0, 1, 2, 3, 4, 5, 6].map(d => { let off = 0, lv = 0; for (const sf of S.cfg.staff) { const c = C.cellOf(w, sf.id, d); const k = c && c.status ? cm[C.key(c.status)] : null; if (k && k.kind === 'off') off += +k.off || 0; if (k && k.kind === 'leave') lv++; } return { off, lv }; });
   let h = '<div class="bar"><span class="help">Nhập OFF, nghỉ phép, ốm… của tuần này trước khi bấm Tự động chia. Chọn trong ô là lưu ngay. Người đã có chuyến mà nhập nghỉ sẽ báo đỏ ở Lịch tuần; bấm Tự động chia → Chỉ lấp chỗ trống để gỡ ra và xếp người thay.</span><span class="spacer"></span>' +
     '<input class="inp" id="fq" placeholder="Tìm nhân viên…" value="' + esc(S.filter.q) + '" style="width:170px">' +
-    '<button class="btn" data-act="leave-clear">Xoá hết OFF tự thêm</button><button class="btn pri" data-act="auto">Tự động chia</button></div>';
+    '<button class="btn" data-act="open-import" data-k="leave">Nhập từ ảnh / văn bản</button><button class="btn" data-act="leave-clear">Xoá hết OFF tự thêm</button><button class="btn pri" data-act="auto">Tự động chia</button></div>';
   h += '<div class="scroll"><table class="g lv"><thead><tr><th class="stick">Nhân viên</th>';
   for (let d = 0; d < 7; d++) h += '<th>' + C.dayLabel(w.start, d) + '<div class="muted" style="font-weight:400">OFF ' + fmtN(per[d].off) + ' · phép/ốm ' + per[d].lv + '</div></th>';
   h += '<th>Tổng OFF</th></tr></thead><tbody>';
@@ -1667,7 +1701,7 @@ function kpiRow() {
 /* ---------- Lịch bay ---------- */
 function viewPlan() {
   const w = S.week;
-  let h = '<div class="bar"><span class="help">Bật/tắt từng chuyến theo ngày (CANX), sửa số hiệu và giờ nếu đổi lịch. Bấm dòng “định mức” để đặt số người riêng cho ngày đó. Giờ trong ô (4 chữ số) được dùng để tính khung giờ làm.</span><span class="spacer"></span><button class="btn" data-act="plan-reset">Đặt lại theo lịch bay mặc định</button></div>';
+  let h = '<div class="bar"><span class="help">Bật/tắt từng chuyến theo ngày (CANX), sửa số hiệu và giờ nếu đổi lịch. Bấm dòng “định mức” để đặt số người riêng cho ngày đó. Giờ trong ô (4 chữ số) được dùng để tính khung giờ làm.</span><span class="spacer"></span><button class="btn" data-act="open-import" data-k="plan">Nhập từ ảnh / văn bản</button><button class="btn" data-act="plan-reset">Đặt lại theo lịch bay mặc định</button></div>';
   h += '<div class="scroll"><table class="g"><thead><tr><th class="stick">Slot</th>';
   for (let d = 0; d < 7; d++) h += '<th>' + C.dayLabel(w.start, d) + '</th>';
   h += '</tr></thead><tbody>';
@@ -1730,7 +1764,7 @@ function viewStats() {
 function viewTs() {
   const w = S.week; const ts = C.timesheet(S.cfg, w); const d = S.tsDay;
   let h = '<div class="bar"><span class="help">Nhập số phút OVER (làm thêm) và BÙ theo ca ngày/đêm. Giờ công mặc định = số ngày làm × ' + S.cfg.rules.hoursPerShift + 'h, sửa được từng người. Tổng được liên kết đúng người, không lệch dòng như sheet OVER cũ.</span></div>';
-  h += '<div class="bar"><div class="seg">' + DAYS.map((x, i) => '<button data-act="ts-day" data-d="' + i + '" class="' + (i === d ? 'on' : '') + '">' + C.dayLabel(w.start, i) + '</button>').join('') + '</div><span class="spacer"></span><button class="btn" data-act="export-xlsx">Xuất Excel</button></div>';
+  h += '<div class="bar"><div class="seg">' + DAYS.map((x, i) => '<button data-act="ts-day" data-d="' + i + '" class="' + (i === d ? 'on' : '') + '">' + C.dayLabel(w.start, i) + '</button>').join('') + '</div><span class="spacer"></span><button class="btn" data-act="open-import" data-k="ts">Nhập từ ảnh / văn bản</button><button class="btn" data-act="export-xlsx">Xuất Excel</button></div>';
   h += '<div class="scroll ts"><table class="g"><thead><tr><th class="stick">Nhân viên</th><th>Ca ' + DAYS[d] + '</th><th>OVER ngày</th><th>OVER đêm</th><th>BÙ ngày</th><th>BÙ đêm</th><th>Tổng OVER ngày</th><th>Tổng OVER đêm</th><th>Tổng BÙ ngày</th><th>Tổng BÙ đêm</th><th>Giờ công</th><th>Giờ công thực tế</th><th>Giờ đêm theo ca</th><th>Giờ công đêm thực tế</th></tr></thead><tbody>';
   for (const sf of S.cfg.staff.filter(s => s.kind === 'flight' && s.active)) {
     const o = (w.over && w.over[sf.id] && w.over[sf.id][d]) || {}; const t = ts[sf.id];
@@ -1842,6 +1876,9 @@ async function saveAccess() {
 function cfgData() {
   const dl = !!Store.dl;
   return '<div class="formgrid">' +
+    '<label><b>Nhập từ ảnh, văn bản, CSV</b><span>Ảnh chụp giấy viết tay, bảng copy từ Excel/Google Sheets/Zalo, file CSV. Có bước kiểm tra, sửa trước khi nhập, và tự sao lưu.</span><button class="btn pri" data-act="open-import">Nhập dữ liệu…</button></label>' +
+    '<label><b>Bản sao lưu tự động</b><span>Mỗi lần nhập, máy tự sao lưu tuần trước khi ghi (giữ 30 bản gần nhất). Khôi phục được bất cứ lúc nào.</span><button class="btn" data-act="open-backups">Xem và khôi phục…</button></label>' +
+    cfgAI() +
     '<label><b>Nhập file Excel lịch tuần</b><span>Đọc file cùng định dạng file LỊCH … HAO.xlsx: lịch bay ở trên, nhân viên ở dưới, mỗi ngày 2 cột. Nhân viên mới được thêm vào danh sách, nhóm lấy theo màu ô tên. Tuần trong file sẽ được tạo hoặc ghi đè.</span><button class="btn pri" data-act="import-xlsx">Chọn file Excel…</button></label>' +
     '<label><b>Xuất Excel tuần đang mở</b><span>Gồm các sheet: Lịch tuần, Quân số, Thống kê, Chấm công.</span><button class="btn" data-act="export-xlsx"' + (dl ? '' : ' disabled') + '>Tải file Excel</button>' + (dl ? '' : '<span class="muted">Không tải được file trong chế độ xem này.</span>') + '</label>' +
     '<label><b>Sao lưu toàn bộ</b><span>Một file JSON chứa cài đặt và mọi tuần. Nên tải về sau mỗi tuần.</span><button class="btn" data-act="export-json"' + (dl ? '' : ' disabled') + '>Tải bản sao lưu</button></label>' +
@@ -2195,6 +2232,10 @@ document.addEventListener('click', async e => {
     case 'import-json': $('#fileJson').click(); break;
     case 'export-xlsx': if (w) exportXlsx(); break;
     case 'export-json': exportJson(); break;
+    case 'open-import': openImport(t.dataset.k); break;
+    case 'open-backups': openBackups(); break;
+    case 'gem-save': { const k = ($('#gemKey').value || '').trim(), m = ($('#gemModel').value || '').trim() || 'gemini-2.5-flash'; if (k) Store.lsSet('geminiKey', k); Store.lsSet('geminiModel', m); toast(k ? 'Đã lưu khoá AI trên máy này' : 'Chưa nhập khoá'); render(); break; }
+    case 'gem-del': try { localStorage.removeItem('pcsb:geminiKey'); } catch (e) {} toast('Đã xoá khoá AI khỏi máy này'); render(); break;
     case 'signout': if (FBX.auth) { Store.unsub.forEach(u => { try { u(); } catch (e) {} }); await FBX.auth.signOut(); location.reload(); } break;
     case 'g-login': case 'pw-login': case 'pw-signup': case 'pw-reset': case 'verify-resend': case 'verify-check': case 'retry': authAction(a); break;
     case 'reload': location.reload(); break;
@@ -2271,8 +2312,526 @@ document.addEventListener('keydown', e => {
   const tag = (e.target.tagName || '').toLowerCase();
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && tag !== 'input' && tag !== 'textarea') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y' && tag !== 'input') { e.preventDefault(); redo(); }
-  if (e.key === 'Escape') { if ($('#modalHost').innerHTML) closeModal(); else if (S.sel || S.covSel) { S.sel = null; S.covSel = null; render(); } }
+  if (e.key === 'Escape') { if ($('#modalHost').innerHTML) { closeModal(); S.imp = null; } else if (S.sel || S.covSel) { S.sel = null; S.covSel = null; render(); } }
 });
+/* ================= NHẬP DỮ LIỆU ĐA NGUỒN: ảnh, văn bản, CSV, AI ================= */
+const IMP_KINDS = {
+  assign: { label: 'Phân ca', desc: 'chuyến + trạng thái của từng người, từng ngày' },
+  leave: { label: 'OFF / NP / nghỉ', desc: 'chỉ trạng thái, giữ nguyên chuyến đã xếp' },
+  ts: { label: 'Chấm công', desc: 'phút OVER / BÙ ngày, đêm' },
+  plan: { label: 'Lịch bay', desc: 'chuyến, giờ, CANX theo ngày' }
+};
+const stripVN = s => C.norm(s).replace(/đ/g, 'd').replace(/Đ/g, 'D').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+function lev(a, b) {
+  const m = a.length, n = b.length; if (!m) return n; if (!n) return m;
+  let prev = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) { const cur = [i]; for (let j = 1; j <= n; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); prev = cur; }
+  return prev[n];
+}
+function matchStaff(raw) {
+  const n = stripVN(raw).replace(/\s+(KD|AKFD|VZTW|VZBX)$/, '');
+  if (!n) return { id: '', score: 0 };
+  let best = null, bs = 0, second = 0;
+  for (const sf of S.cfg.staff) {
+    const m = stripVN(sf.name); let sc;
+    if (m === n) sc = 1;
+    else if (m.replace(/\s/g, '') === n.replace(/\s/g, '')) sc = 0.97;
+    else if (n.length >= 3 && (m.startsWith(n + ' ') || n.startsWith(m + ' '))) sc = 0.85;
+    else sc = (1 - lev(m, n) / Math.max(m.length, n.length)) * 0.92;
+    if (sc > bs) { second = bs; bs = sc; best = sf; } else if (sc > second) second = sc;
+  }
+  return { id: bs >= 0.6 ? best.id : '', score: bs, ambiguous: bs < 1 && bs - second < 0.06 };
+}
+function dayOf(tok, start) {
+  const t = stripVN(tok).replace(/\s+/g, ' ').trim(); if (!t) return -1;
+  const map = { T2: 0, T3: 1, T4: 2, T5: 3, T6: 4, T7: 5, CN: 6, 'THU 2': 0, 'THU 3': 1, 'THU 4': 2, 'THU 5': 3, 'THU 6': 4, 'THU 7': 5, 'CHU NHAT': 6, MON: 0, TUE: 1, WED: 2, THU: 3, FRI: 4, SAT: 5, SUN: 6, MONDAY: 0, TUESDAY: 1, WEDNESDAY: 2, THURSDAY: 3, FRIDAY: 4, SATURDAY: 5, SUNDAY: 6 };
+  const head = t.split(' ').slice(0, 2).join(' ');
+  if (map[t] != null) return map[t];
+  if (map[head] != null) return map[head];
+  if (map[t.split(' ')[0]] != null && t.length <= 4) return map[t.split(' ')[0]];
+  const m = t.match(/(\d{1,2})[\/\-.](\d{1,2})/);
+  if (m && start) for (let d = 0; d < 7; d++) { const x = new Date(C.addDays(start, d) + 'T00:00:00'); if (x.getDate() === +m[1] && x.getMonth() + 1 === +m[2]) return d; }
+  return -1;
+}
+function splitCSV(line, delim) {
+  const out = []; let cur = '', q = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (q) { if (ch === '"' && line[i + 1] === '"') { cur += '"'; i++; } else if (ch === '"') q = false; else cur += ch; }
+    else if (ch === '"') q = true; else if (ch === delim) { out.push(cur); cur = ''; } else cur += ch;
+  }
+  out.push(cur); return out;
+}
+// đọc bảng dán từ Excel / Google Sheets / CSV / văn bản có cột
+function parseGridText(text) {
+  const lines = String(text || '').replace(/\r/g, '').split('\n').filter(l => l.trim());
+  if (!lines.length) return [];
+  const has = c => lines.filter(l => l.includes(c)).length >= Math.max(1, lines.length / 2);
+  const delim = text.includes('\t') ? '\t' : has('|') ? '|' : has(';') ? ';' : has(',') ? ',' : null;
+  const rows = lines.map(l => (delim ? splitCSV(l, delim) : l.split(/\s{2,}/)).map(c => C.norm(c)));
+  return rows;
+}
+function gridToRows(rows, start) {
+  // tìm dòng tiêu đề có ngày
+  let hdrIdx = -1, dayCol = {};
+  for (let i = 0; i < Math.min(rows.length, 6) && hdrIdx < 0; i++) {
+    const cols = {}; rows[i].forEach((c, j) => { const d = dayOf(c, start); if (d >= 0) cols[j] = d; });
+    if (Object.keys(cols).length >= 3) { hdrIdx = i; dayCol = cols; }
+  }
+  const body = rows.slice(hdrIdx + 1);
+  // cột tên: cột đầu tiên phần lớn là chữ, không phải số thứ tự
+  const nameCol = body.filter(r => /^\d+$/.test(r[0] || '')).length > body.length / 2 ? 1 : 0;
+  const out = [];
+  for (const r of body) {
+    const nameRaw = r[nameCol] || ''; if (!nameRaw || dayOf(nameRaw, start) >= 0) continue;
+    const cells = {};
+    if (hdrIdx >= 0) {
+      const cols = Object.keys(dayCol).map(Number).sort((a, b) => a - b);
+      for (let j = nameCol + 1; j < r.length; j++) {
+        // cột không có tiêu đề thuộc về ngày gần nhất bên trái (bảng 2 cột/ngày)
+        let d = -1; for (const c of cols) if (c <= j) d = dayCol[c];
+        if (d < 0 || !r[j]) continue;
+        cells[d] = cells[d] ? cells[d] + ' + ' + r[j] : r[j];
+      }
+    } else {
+      const vals = r.slice(nameCol + 1);
+      const pair = vals.length >= 13;
+      for (let d = 0; d < 7; d++) {
+        const v = pair ? [vals[2 * d], vals[2 * d + 1]].filter(Boolean).join(' + ') : vals[d];
+        if (v) cells[d] = v;
+      }
+    }
+    out.push({ nameRaw, cells });
+  }
+  return out;
+}
+function cellRecs(rowsIn, kind) {
+  const cm = C.codeMap(S.cfg); const recs = [];
+  for (const row of rowsIn) {
+    const mt = matchStaff(row.name || row.nameRaw);
+    if (row.nameRaw && row.name && mt.score < 0.6) Object.assign(mt, matchStaff(row.nameRaw));
+    for (const k in row.cells) {
+      const d = typeof k === 'string' && isNaN(+k) ? dayOf(k, S.imp.week) : +k; if (d < 0 || d > 6) continue;
+      const text = C.norm(row.cells[k]); if (!text) continue;
+      const pc = C.parseCell(text, S.cfg, cm);
+      const r = { inc: true, nameRaw: row.nameRaw || row.name, sid: mt.id, score: mt.score, ambiguous: mt.ambiguous, d, src: text, status: pc.status || '', items: pc.items.map(i => i.slot + (i.role ? '/' + i.role : '') + (i.tag && i.tag !== 'LJ3-4' ? '/' + i.tag : '')).join(' + '), note: pc.note.join('; '), conf: row.confidence, warn: [] };
+      if (kind === 'leave') { r.items = ''; if (!r.status && !r.note) continue; }
+      recs.push(r);
+    }
+  }
+  return recs;
+}
+function tsRecs(rowsIn) {
+  const recs = [];
+  for (const row of rowsIn) {
+    const mt = matchStaff(row.name || row.nameRaw);
+    const d = typeof row.day === 'number' ? row.day : dayOf(row.day || '', S.imp.week);
+    const n = x => x === '' || x == null ? '' : (parseFloat(String(x).replace(',', '.')) || 0);
+    recs.push({ inc: true, nameRaw: row.nameRaw || row.name, sid: mt.id, score: mt.score, ambiguous: mt.ambiguous, d: d >= 0 ? d : S.tsDay, on: n(row.over_ngay), od: n(row.over_dem), bn: n(row.bu_ngay), bd: n(row.bu_dem), conf: row.confidence, src: row.src || '' });
+  }
+  return recs;
+}
+function planRecs(list) {
+  const recs = [];
+  for (const f of list) {
+    let slot = C.norm(f.slot || '').toUpperCase().replace(/\s/g, '');
+    if (!S.cfg.slots.some(s => s.id === slot)) { const s = S.cfg.slots.find(s => stripVN(f.text || '').replace(/\s/g, '').startsWith(stripVN(s.flight).replace(/\s/g, '')) && s.flight); if (s) slot = s.id; }
+    const d = typeof f.day === 'number' ? f.day : dayOf(f.day || '', S.imp.week);
+    if (d < 0) continue;
+    recs.push({ inc: true, slot, d, label: C.norm(String(f.text || '').replace(/CANX|CNX/ig, '')), on: !(f.canx || /CANX|CNX/i.test(f.text || '')), conf: f.confidence, src: f.text || '' });
+  }
+  return recs;
+}
+function gridPlanRecs(rows) {
+  const out = []; for (const r of rows) for (const d in r.cells) out.push({ slot: r.nameRaw, day: +d, text: r.cells[d] });
+  return planRecs(out);
+}
+function gridTsRecs(rows) {
+  // dạng: Tên | (ngày) | OVER ngày | OVER đêm | BÙ ngày | BÙ đêm
+  const out = [];
+  for (const r of rows) {
+    if (!r[0] || /^(TEN|HO TEN|NHAN VIEN|STT)$/.test(stripVN(r[0]))) continue;
+    let i = 1, day = S.tsDay;
+    if (r[1] && dayOf(r[1], S.imp.week) >= 0) { day = dayOf(r[1], S.imp.week); i = 2; }
+    out.push({ nameRaw: r[0], day, over_ngay: r[i], over_dem: r[i + 1], bu_ngay: r[i + 2], bu_dem: r[i + 3] });
+  }
+  return tsRecs(out);
+}
+
+/* ---------- AI đọc ảnh / văn bản ---------- */
+async function aiEngine() {
+  if (!STANDALONE) {
+    let sm = null; try { sm = await window.claude.use('sample'); } catch (e) {}
+    if (!sm) return null;
+    let lim = null; try { lim = await sm.limits(); } catch (e) {}
+    return { name: 'Claude', images: !!(lim && lim.images), pdf: false, call: async (prompt, blobs) => sm.json(prompt, Object.assign({ modelTier: 'default', cache: false }, blobs.length ? { images: blobs } : {})) };
+  }
+  const key = Store.lsGet('geminiKey'); if (!key) return null;
+  const model = Store.lsGet('geminiModel') || 'gemini-2.5-flash';
+  return { name: 'Gemini · ' + model, images: true, pdf: true, call: async (prompt, blobs) => {
+    const parts = [{ text: prompt }];
+    for (const b of blobs) parts.push({ inline_data: { mime_type: b.type || 'image/jpeg', data: await blobB64(b) } });
+    const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent?key=' + encodeURIComponent(key), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig: { responseMimeType: 'application/json', temperature: 0 } })
+    });
+    if (!r.ok) {
+      const t = await r.text().catch(() => '');
+      if (r.status === 400 && /API key/i.test(t)) throw new Error('Khoá API Gemini không đúng. Kiểm tra lại ở Cài đặt → Nhập / xuất dữ liệu.');
+      if (r.status === 429) throw new Error('Đã hết lượt dùng miễn phí của Gemini trong lúc này. Đợi vài phút rồi thử lại.');
+      if (r.status === 404) throw new Error('Không có model "' + model + '". Sửa tên model ở Cài đặt → Nhập / xuất dữ liệu.');
+      throw new Error('Gemini báo lỗi ' + r.status + ': ' + t.slice(0, 200));
+    }
+    const j = await r.json();
+    const txt = ((j.candidates || [])[0] || {}).content ? j.candidates[0].content.parts.map(p => p.text || '').join('') : '';
+    if (!txt) throw new Error('AI không trả về nội dung' + (j.promptFeedback && j.promptFeedback.blockReason ? ' (' + j.promptFeedback.blockReason + ')' : '') + '.');
+    return JSON.parse(txt.replace(/^```(json)?/i, '').replace(/```\s*$/, '').trim());
+  } };
+}
+function blobB64(b) { return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = rej; r.readAsDataURL(b); }); }
+async function prepImage(file, rot) {
+  if (file.type === 'application/pdf') return file;
+  let bmp;
+  try { bmp = await createImageBitmap(file); } catch (e) { throw new Error('Không mở được ảnh "' + file.name + '". Hãy dùng ảnh JPG hoặc PNG.'); }
+  const max = 2200, sc = Math.min(1, max / Math.max(bmp.width, bmp.height));
+  const w = Math.round(bmp.width * sc), h = Math.round(bmp.height * sc);
+  const cv = document.createElement('canvas'); const r = ((rot || 0) % 360 + 360) % 360;
+  cv.width = r % 180 ? h : w; cv.height = r % 180 ? w : h;
+  const g = cv.getContext('2d'); g.translate(cv.width / 2, cv.height / 2); g.rotate(r * Math.PI / 180); g.drawImage(bmp, -w / 2, -h / 2, w, h);
+  return new Promise(res => cv.toBlob(b => res(b), 'image/jpeg', 0.86));
+}
+function aiPrompt(kind, hasText) {
+  const w = S.imp.week;
+  const days = DAYS.map((x, d) => x + ' = ' + C.dayLabel(w, d).slice(3)).join(', ');
+  const staff = S.cfg.staff.map(s => s.name).join(' | ');
+  const slots = S.cfg.slots.filter(s => s.active).map(s => s.id + ' (' + s.flight + ' ' + C.fmtTime(s.time) + ')').join(', ');
+  const codes = S.cfg.codes.map(c => c.code + ' = ' + c.label).join('; ');
+  let p = 'Bạn đọc tài liệu chia lịch / chấm công của nhân viên phục vụ chuyến bay tại sân bay, thường viết tay trên giấy, tiếng Việt.\n' +
+    'Tuần: ' + days + '.\nDanh sách nhân viên (tên chuẩn): ' + staff + '.\n' +
+    'Mã slot chuyến bay: ' + slots + '. Sau mã có thể có vị trí /S (supervisor), /C, /G, /GC, /SE. Một ô có thể có 2 chuyến nối bằng dấu +.\n' +
+    'Mã trạng thái: ' + codes + '.\n\n' +
+    'Quy tắc: chép đúng những gì nhìn thấy, không tự bịa thêm. Ô trống thì bỏ qua. Chữ không đọc được thì ghi dấu ? vào chỗ đó và hạ confidence. ' +
+    '"name" là tên chuẩn gần nhất trong danh sách (để trống nếu không chắc), "name_raw" là tên đúng như viết trong tài liệu. confidence từ 0 đến 1.\n';
+  if (kind === 'assign' || kind === 'leave') p += 'Nhiệm vụ: chép bảng phân ca. Trả về JSON đúng dạng: {"rows":[{"name_raw":"...","name":"...","cells":{"T2":"nội dung ô","T3":"..."},"confidence":0.9}],"warnings":["..."]}. ' +
+    'Khoá trong cells chỉ dùng T2,T3,T4,T5,T6,T7,CN. Nếu một ngày có 2 ô (trạng thái và chuyến) thì nối bằng " + ". ' + (kind === 'leave' ? 'Chỉ cần các ô có trạng thái nghỉ (OFF, NP, ốm, phép…).' : '');
+  else if (kind === 'ts') p += 'Nhiệm vụ: chép bảng chấm công làm thêm. Số liệu tính bằng PHÚT (nếu ghi giờ như 1h30 thì đổi ra 90). Trả về JSON: {"rows":[{"name_raw":"...","name":"...","day":"T2","over_ngay":0,"over_dem":0,"bu_ngay":0,"bu_dem":0,"confidence":0.9}],"warnings":[]}. Ô không có số thì để null.';
+  else p += 'Nhiệm vụ: chép lịch bay theo ngày. Trả về JSON: {"flights":[{"slot":"mã slot trong danh sách nếu khớp","day":"T2","text":"số hiệu + giờ + sân bay như viết, vd TW008 1145 ICN","canx":false,"confidence":0.9}],"warnings":[]}.';
+  if (hasText) p += '\n\nNội dung văn bản cần đọc:\n"""\n' + S.imp.text + '\n"""';
+  return p;
+}
+
+/* ---------- Bản sao lưu tự động ---------- */
+const Backup = {
+  async create(label) {
+    const id = 'b' + Date.now();
+    const rec = { id, at: new Date().toISOString(), by: FBX.user ? FBX.user.email : '', label, week: S.week ? S.week.start : '', data: JSON.parse(JSON.stringify({ week: S.week, cfg: S.cfg })) };
+    const meta = { id, at: rec.at, by: rec.by, label, week: rec.week };
+    if (Store.mode === 'fb' || Store.mode === 'db') {
+      try {
+        await Store.D.doc('backups/' + id).set(rec);
+        const idx = Store.D.doc('config/backups'); const s = await idx.get();
+        let list = s.exists ? (s.data().list || []) : []; list.unshift(meta);
+        const drop = list.slice(30); list = list.slice(0, 30);
+        await idx.set({ list });
+        drop.forEach(x => Store.D.doc('backups/' + x.id).delete().catch(() => {}));
+        return meta;
+      } catch (e) { console.warn('backup cloud failed', e); meta.localOnly = true; }
+    }
+    const list = Store.lsGet('backups') || []; list.unshift(meta);
+    while (list.length > 8) { const x = list.pop(); try { localStorage.removeItem('pcsb:backup:' + x.id); } catch (e) {} }
+    if (!Store.lsSet('backup:' + id, rec)) { meta.failed = true; }
+    Store.lsSet('backups', list);
+    return meta;
+  },
+  async list() {
+    let cloud = [];
+    if (Store.mode === 'fb' || Store.mode === 'db') { try { const s = await Store.D.doc('config/backups').get(); cloud = s.exists ? (s.data().list || []) : []; } catch (e) {} }
+    const local = (Store.lsGet('backups') || []).map(x => Object.assign({}, x, { localOnly: true }));
+    return [...cloud, ...local].sort((a, b) => (a.at < b.at ? 1 : -1));
+  },
+  async get(meta) {
+    if (!meta.localOnly && (Store.mode === 'fb' || Store.mode === 'db')) { const s = await Store.D.doc('backups/' + meta.id).get(); return s.exists ? s.data() : null; }
+    return Store.lsGet('backup:' + meta.id);
+  }
+};
+async function openBackups() {
+  modal('Bản sao lưu tự động', '<p class="muted">Đang tải…</p>', [{ label: 'Đóng' }]);
+  const list = await Backup.list();
+  const host = $('#modalHost .box > div');
+  if (!host) return;
+  host.innerHTML = '<p class="help" style="margin-top:0">Mỗi lần nhập dữ liệu, máy tự lưu một bản trước khi ghi. Khôi phục sẽ đưa tuần về đúng trạng thái lúc đó (và tự sao lưu bản hiện tại trước).</p>' +
+    (list.length ? '<div class="list">' + list.map((b, i) => '<div class="li"><div class="grow"><b>' + esc(b.label || 'Sao lưu') + '</b><div class="meta">' + new Date(b.at).toLocaleString('vi-VN') + ' · tuần ' + (b.week ? weekName(b.week) : '?') + (b.by ? ' · ' + esc(b.by) : '') + (b.localOnly ? ' · chỉ trên máy này' : '') + '</div></div><button class="btn sm" data-bk="' + i + '">Khôi phục</button></div>').join('') + '</div>' : '<p class="muted">Chưa có bản sao lưu nào.</p>');
+  host.querySelectorAll('[data-bk]').forEach(btn => btn.onclick = async () => {
+    const meta = list[+btn.dataset.bk];
+    btn.disabled = true; btn.textContent = 'Đang khôi phục…';
+    try {
+      const rec = await Backup.get(meta); if (!rec || !rec.data || !rec.data.week) throw new Error('Không đọc được bản sao lưu');
+      await Backup.create('Trước khi khôi phục bản ' + new Date(meta.at).toLocaleString('vi-VN'));
+      const w = rec.data.week;
+      if (!S.week || S.week.start !== w.start) { if (S.weeks.includes(w.start)) await openWeek(w.start); else S.weeks = [...new Set([...S.weeks, w.start])].sort(); }
+      if (S.week && S.week.start === w.start) { S.undo.push(snapshot()); S.redo = []; }
+      S.week = w; recompute(); Store.save('week', w.start); S.tab = 'roster'; closeModal(); render(); Store.watch();
+      toast('Đã khôi phục tuần ' + weekName(w.start) + ' về lúc ' + new Date(meta.at).toLocaleString('vi-VN'));
+    } catch (e) { toast('Lỗi: ' + e.message); btn.disabled = false; btn.textContent = 'Khôi phục'; }
+  });
+}
+
+/* ---------- Trình nhập ---------- */
+function openImport(kind) {
+  if (S.ro || !S.week) { if (!S.week) toast('Hãy tạo hoặc mở một tuần trước.'); return; }
+  S.imp = { step: 'source', kind: kind || 'assign', week: S.week.start, src: 'image', files: [], text: '', recs: [], warnings: [], engine: null, onlyIssues: false, mode: 'replace' };
+  aiEngine().then(e => { if (S.imp) { S.imp.engine = e; renderImport(); } });
+  renderImport();
+}
+function closeImport() { if (S.imp) S.imp.files.forEach(f => f.url && URL.revokeObjectURL(f.url)); S.imp = null; $('#modalHost').innerHTML = ''; }
+function renderImport() {
+  const I = S.imp; if (!I) return;
+  const host = $('#modalHost');
+  const prevBody = host.querySelector('.wiz .wbody'); const sc = prevBody ? prevBody.scrollTop : 0;
+  let body = '', foot = '';
+  if (I.step === 'source') {
+    const eng = I.engine;
+    body += '<div class="wgrid"><div><h4>1. Loại dữ liệu</h4><div class="seg wrap">' + Object.keys(IMP_KINDS).map(k => '<button data-iact="kind" data-k="' + k + '" class="' + (I.kind === k ? 'on' : '') + '">' + IMP_KINDS[k].label + '</button>').join('') + '</div><p class="help">' + IMP_KINDS[I.kind].desc + '</p></div>' +
+      '<div><h4>2. Nhập vào tuần</h4><select class="sel" id="impWeek">' + S.weeks.map(w => '<option value="' + w + '"' + (w === I.week ? ' selected' : '') + '>' + weekName(w) + '</option>').join('') + '</select>' + (I.kind === 'ts' ? '<p class="help">Nếu tài liệu không ghi ngày, dùng ngày: <select class="sel sm" id="impTsDay">' + DAYS.map((x, d) => '<option value="' + d + '"' + (d === S.tsDay ? ' selected' : '') + '>' + C.dayLabel(I.week, d) + '</option>').join('') + '</select></p>' : '') + '</div></div>';
+    body += '<h4>3. Nguồn dữ liệu</h4><div class="srcs">' + [
+      ['image', 'Ảnh chụp / PDF', 'Giấy viết tay, bảng in, ảnh màn hình. AI đọc rồi bạn kiểm tra.'],
+      ['text', 'Dán văn bản / bảng', 'Copy từ Excel, Google Sheets, Zalo, email…'],
+      ['csv', 'File CSV / TXT', 'Xuất từ Google Sheets hoặc phần mềm khác'],
+      ['xlsx', 'File Excel mẫu cũ', 'Đúng định dạng LỊCH … HAO.xlsx']
+    ].map(([k, t, d]) => '<button class="src' + (I.src === k ? ' on' : '') + '" data-iact="src" data-k="' + k + '"><b>' + t + '</b><span>' + d + '</span></button>').join('') + '</div>';
+    if (I.src === 'image') {
+      body += '<div class="aibox">' + (eng ? '<span class="badge ok">AI: ' + esc(eng.name) + '</span>' + (eng.images ? '' : ' <span class="muted">Chế độ xem này không gửi ảnh được.</span>') : '<span class="badge warn">Chưa bật AI đọc ảnh</span> ' + (STANDALONE ? '<span class="help">Vào Cài đặt & dữ liệu → Nhập / xuất dữ liệu → "Đọc ảnh bằng AI", dán khoá Gemini miễn phí.</span>' : '<span class="help">Đang kết nối Claude…</span>')) + '</div>';
+      body += '<label class="drop" for="impFiles"><b>Chọn ảnh hoặc chụp bằng điện thoại</b><span>Nhiều trang thì chọn nhiều ảnh. Chụp thẳng, đủ sáng, cả bảng nằm trong khung.</span><input type="file" id="impFiles" accept="image/*' + (eng && eng.pdf ? ',application/pdf' : '') + '" multiple></label>';
+      if (I.files.length) body += '<div class="thumbs">' + I.files.map((f, i) => '<div class="th">' + (f.pdf ? '<div class="pdf">PDF<br>' + esc(f.name) + '</div>' : '<img src="' + f.url + '" alt="" style="transform:rotate(' + f.rot + 'deg)">') + '<div class="bar" style="margin:4px 0 0">' + (f.pdf ? '' : '<button class="btn sm" data-iact="rot" data-i="' + i + '">⟳ Xoay</button>') + '<button class="btn sm danger" data-iact="rmf" data-i="' + i + '">Bỏ</button></div></div>').join('') + '</div>';
+      foot = '<button class="btn" data-iact="close">Huỷ</button><button class="btn pri" data-iact="run-ai"' + (I.files.length && eng && eng.images ? '' : ' disabled') + '>Đọc bằng AI</button>';
+    } else if (I.src === 'text' || I.src === 'csv') {
+      if (I.src === 'csv') body += '<label class="drop" for="impCsv"><b>Chọn file .csv / .tsv / .txt</b><input type="file" id="impCsv" accept=".csv,.tsv,.txt,text/plain,text/csv"></label>';
+      body += '<textarea class="inp" id="impText" rows="10" spellcheck="false" placeholder="' + esc(I.kind === 'ts' ? 'Tên ⇥ OVER ngày ⇥ OVER đêm ⇥ BÙ ngày ⇥ BÙ đêm  (có thể thêm cột ngày sau tên)' : I.kind === 'plan' ? 'Slot ⇥ T2 ⇥ T3 … ⇥ CN   (vd: AK1 ⇥ AK643 1120 ⇥ … ⇥ CANX)' : 'Tên ⇥ T2 ⇥ T3 ⇥ T4 ⇥ T5 ⇥ T6 ⇥ T7 ⇥ CN\nNHƯ HẢO ⇥ HX0/S ⇥ OFF ⇥ …') + '">' + esc(I.text) + '</textarea>' +
+        '<p class="help">Bảng copy từ Excel/Google Sheets: dòng đầu nên có tiêu đề ngày (T2…CN hoặc 05/10…). Văn bản tự do kiểu tin nhắn Zalo ("Hảo OFF thứ 4, Ánh NP T2-T3") thì bấm "Đọc bằng AI".</p>';
+      foot = '<button class="btn" data-iact="close">Huỷ</button>' + (eng ? '<button class="btn" data-iact="run-ai-text">Đọc bằng AI</button>' : '') + '<button class="btn pri" data-iact="run-grid">Đọc như bảng</button>';
+    } else if (I.src === 'xlsx') {
+      body += '<p class="help">File Excel đúng mẫu cũ dùng trình nhập Excel riêng, có chọn Toàn bộ / Chỉ lịch bay / Chỉ OFF-NP.</p>';
+      foot = '<button class="btn" data-iact="close">Huỷ</button><button class="btn pri" data-iact="xlsx">Chọn file Excel…</button>';
+    }
+    if (I.error) body += '<div class="issue" style="margin-top:10px">' + esc(I.error) + '</div>';
+  } else if (I.step === 'busy') {
+    body = '<div class="empty" style="border:0"><h2>Đang đọc dữ liệu…</h2><p class="help" style="margin:0 auto">' + esc(I.busyMsg || '') + '</p></div>';
+    foot = '<button class="btn" data-iact="cancel">Dừng</button>';
+  } else if (I.step === 'review') {
+    body = reviewHtml();
+    const n = I.recs.filter(r => r.inc).length;
+    foot = '<button class="btn" data-iact="back">‹ Quay lại</button><span class="spacer"></span><span class="muted" style="font-size:12.5px">' + n + ' dòng sẽ được nhập</span><button class="btn pri" data-iact="confirm"' + (n ? '' : ' disabled') + '>Kiểm tra xong, nhập vào lịch…</button>';
+  }
+  const title = 'Nhập dữ liệu · ' + IMP_KINDS[I.kind].label + (I.step === 'review' ? ' · Kiểm tra trước khi nhập' : '');
+  host.innerHTML = '<div class="modal"><div class="box wiz" role="dialog" aria-modal="true" aria-label="' + esc(title) + '"><div class="whead"><h3>' + esc(title) + '</h3><button class="x" data-iact="close" aria-label="Đóng">×</button></div><div class="wbody">' + body + '</div><div class="wfoot">' + foot + '</div></div></div>';
+  const nb = host.querySelector('.wbody'); if (nb && I.keepScroll) nb.scrollTop = sc; I.keepScroll = false;
+}
+function curText(sid, d) {
+  const c = C.cellOf(S.imp.wk || S.week, sid, d); if (!c) return '';
+  return [c.status, (c.items || []).map(i => i.slot + (i.role ? '/' + i.role : '')).join(' + '), c.note].filter(Boolean).join(' · ');
+}
+function reviewHtml() {
+  const I = S.imp; const recs = I.recs;
+  const staffOpts = sel => '<option value="">— Chưa khớp, chọn người —</option>' + S.cfg.staff.map(s => '<option value="' + s.id + '"' + (s.id === sel ? ' selected' : '') + '>' + esc(s.name) + '</option>').join('');
+  const dayOpts = sel => DAYS.map((x, d) => '<option value="' + d + '"' + (d === sel ? ' selected' : '') + '>' + C.dayLabel(I.week, d) + '</option>').join('');
+  const codeOpts = sel => '<option value="">—</option>' + S.cfg.codes.map(c => '<option value="' + esc(c.code) + '"' + (C.key(c.code) === C.key(sel) ? ' selected' : '') + '>' + esc(c.code) + '</option>').join('') + (sel && !codeOf(sel) ? '<option selected>' + esc(sel) + '</option>' : '');
+  // kiểm tra
+  const slotIds = new Set(S.cfg.slots.map(s => s.id));
+  const seen = {};
+  for (const r of recs) {
+    r.warn = [];
+    if (I.kind !== 'plan') {
+      if (!r.sid) r.warn.push('Chưa khớp nhân viên');
+      else if (r.score < 0.9 || r.ambiguous) r.warn.push('Tên khớp chưa chắc (' + Math.round(r.score * 100) + '%)');
+      const k = r.sid + '|' + r.d; if (r.sid && r.inc) { if (seen[k]) r.warn.push('Trùng người + ngày với dòng khác'); seen[k] = 1; }
+    } else if (!slotIds.has(r.slot)) r.warn.push('Mã slot không có trong danh sách');
+    if (r.conf != null && r.conf < 0.7) r.warn.push('AI đọc chưa chắc');
+    if (/\?/.test(r.src || '') || /\?/.test(r.items || '') || /\?/.test(r.status || '')) r.warn.push('Có chỗ không đọc được (?)');
+    if (I.kind === 'assign' && r.note && r.note.length) r.warn.push('Có chữ chưa nhận ra: ' + r.note);
+  }
+  const issues = recs.filter(r => r.warn.length).length;
+  const unmatched = I.kind === 'plan' ? 0 : recs.filter(r => !r.sid).length;
+  let h = '<div class="revtop">';
+  if (I.files.length) h += '<div class="revimgs">' + I.files.map(f => f.pdf ? '<div class="pdf">PDF ' + esc(f.name) + '</div>' : '<a href="' + f.url + '" target="_blank" rel="noopener"><img src="' + f.url + '" alt="Ảnh gốc" style="transform:rotate(' + f.rot + 'deg)"></a>').join('') + '<span class="help">Bấm ảnh để mở lớn, đối chiếu từng dòng.</span></div>';
+  h += '<div class="revsum"><div class="kpis" style="margin:0"><div class="kpi"><div class="k">Dòng đọc được</div><div class="v">' + recs.length + '</div></div><div class="kpi ' + (issues ? 'warn' : 'ok') + '"><div class="k">Cần xem lại</div><div class="v">' + issues + '</div></div>' + (I.kind !== 'plan' ? '<div class="kpi ' + (unmatched ? 'err' : 'ok') + '"><div class="k">Chưa khớp tên</div><div class="v">' + unmatched + '</div></div>' : '') + '</div>' +
+    (I.warnings.length ? '<div class="issue warn" style="margin-top:8px">AI ghi chú: ' + esc(I.warnings.join(' · ')) + '</div>' : '') +
+    '<div class="bar" style="margin:10px 0 0"><label class="chk"><input type="checkbox" id="impOnly"' + (I.onlyIssues ? ' checked' : '') + '> Chỉ hiện dòng cần xem lại</label>' +
+    (I.kind === 'assign' ? '<span class="muted" style="font-size:12.5px">Cách ghi:</span><select class="sel sm" id="impMode"><option value="replace"' + (I.mode === 'replace' ? ' selected' : '') + '>Ghi đè ô (thay chuyến và trạng thái)</option><option value="merge"' + (I.mode === 'merge' ? ' selected' : '') + '>Bổ sung (giữ chuyến đang có)</option></select>' : '') +
+    '<button class="btn sm" data-iact="all" data-v="1">Chọn tất cả</button><button class="btn sm" data-iact="all" data-v="0">Bỏ chọn tất cả</button></div></div></div>';
+  h += '<div class="scroll" style="max-height:none;min-height:0"><table class="g rev"><thead><tr><th class="c">Nhập</th>';
+  if (I.kind === 'plan') h += '<th>Slot</th><th>Ngày</th><th>Chuyến / giờ</th><th>Bay?</th><th>Hiện tại</th>';
+  else {
+    h += '<th>Tên trong nguồn</th><th>Nhân viên</th><th>Ngày</th><th>Hiện có trong lịch</th>';
+    if (I.kind === 'ts') h += '<th>OVER ngày</th><th>OVER đêm</th><th>BÙ ngày</th><th>BÙ đêm</th>';
+    else h += '<th>Trạng thái</th>' + (I.kind === 'assign' ? '<th>Chuyến (vd AK1/S + EK)</th>' : '') + '<th>Ghi chú</th>';
+  }
+  h += '<th>Kiểm tra</th></tr></thead><tbody>';
+  recs.forEach((r, i) => {
+    if (I.onlyIssues && !r.warn.length) return;
+    const f = (k, w) => '<input class="inp sm" data-ir="' + i + '|' + k + '" value="' + esc(r[k] == null ? '' : r[k]) + '" style="width:' + w + 'px">';
+    h += '<tr class="' + (r.inc ? '' : 'off') + (r.warn.length ? ' wr' : '') + '"><td class="c"><input type="checkbox" data-ir="' + i + '|inc"' + (r.inc ? ' checked' : '') + '></td>';
+    if (I.kind === 'plan') {
+      h += '<td><select class="sel sm" data-ir="' + i + '|slot">' + S.cfg.slots.map(s => '<option' + (s.id === r.slot ? ' selected' : '') + '>' + esc(s.id) + '</option>').join('') + (slotIds.has(r.slot) ? '' : '<option selected value="' + esc(r.slot) + '">' + esc(r.slot || '?') + '</option>') + '</select></td>' +
+        '<td><select class="sel sm" data-ir="' + i + '|d">' + dayOpts(r.d) + '</select></td><td>' + f('label', 170) + '</td><td class="c"><input type="checkbox" data-ir="' + i + '|on"' + (r.on ? ' checked' : '') + '></td><td class="muted">' + esc(slotIds.has(r.slot) ? C.planOf(S.cfg, I.wk || S.week, r.slot, r.d).label + (C.planOf(S.cfg, I.wk || S.week, r.slot, r.d).on ? '' : ' (CANX)') : '') + '</td>';
+    } else {
+      h += '<td><span title="' + esc(r.src || '') + '">' + esc(r.nameRaw) + '</span>' + (r.src ? '<div class="meta">' + esc(r.src) + '</div>' : '') + '</td>' +
+        '<td><select class="sel sm" data-ir="' + i + '|sid" style="max-width:190px">' + staffOpts(r.sid) + '</select></td><td><select class="sel sm" data-ir="' + i + '|d">' + dayOpts(r.d) + '</select></td>' +
+        '<td class="muted" style="max-width:180px">' + esc(r.sid ? curText(r.sid, r.d) : '') + '</td>';
+      if (I.kind === 'ts') h += '<td>' + f('on', 60) + '</td><td>' + f('od', 60) + '</td><td>' + f('bn', 60) + '</td><td>' + f('bd', 60) + '</td>';
+      else h += '<td><select class="sel sm" data-ir="' + i + '|status">' + codeOpts(r.status) + '</select></td>' + (I.kind === 'assign' ? '<td>' + f('items', 150) + '</td>' : '') + '<td>' + f('note', 100) + '</td>';
+    }
+    h += '<td>' + (r.warn.length ? r.warn.map(x => '<div class="why">' + esc(x) + '</div>').join('') : '<span class="okc">✓</span>') + '</td></tr>';
+  });
+  h += '</tbody></table></div>';
+  if (!recs.length) h += '<div class="empty"><h2>Không đọc được dòng nào</h2><p class="help" style="margin:0 auto">Thử ảnh rõ hơn, xoay ảnh cho thẳng, hoặc dán văn bản.</p></div>';
+  return h;
+}
+async function impRunGrid() {
+  const I = S.imp; I.error = '';
+  const rows = parseGridText(I.text);
+  if (!rows.length) { I.error = 'Chưa có nội dung để đọc.'; renderImport(); return; }
+  await impLoadWeek();
+  if (I.kind === 'ts') I.recs = gridTsRecs(rows);
+  else { const g = gridToRows(rows, I.week); I.recs = I.kind === 'plan' ? gridPlanRecs(g) : cellRecs(g, I.kind); }
+  I.warnings = []; I.step = 'review'; renderImport();
+}
+async function impLoadWeek() {
+  const I = S.imp;
+  I.wk = I.week === S.week.start ? S.week : (await Store.getWeek(I.week)) || S.week;
+}
+async function impRunAI(useText) {
+  const I = S.imp; I.error = '';
+  if (!I.engine) { I.error = 'Chưa bật AI.'; renderImport(); return; }
+  if (useText && !C.norm(I.text)) { I.error = 'Chưa có nội dung để đọc.'; renderImport(); return; }
+  I.step = 'busy'; I.busyMsg = 'Gửi ' + (useText ? 'văn bản' : I.files.length + ' ảnh') + ' cho ' + I.engine.name + '. Thường mất 10–40 giây.'; renderImport();
+  const token = I.token = Math.random();
+  try {
+    await impLoadWeek();
+    const blobs = useText ? [] : await Promise.all(I.files.map(f => prepImage(f.file, f.rot)));
+    const out = await I.engine.call(aiPrompt(I.kind, useText), blobs);
+    if (!S.imp || S.imp.token !== token) return;
+    I.warnings = (out && out.warnings) || [];
+    if (I.kind === 'plan') I.recs = planRecs((out && out.flights) || []);
+    else if (I.kind === 'ts') I.recs = tsRecs(((out && out.rows) || []).map(r => ({ name: r.name, nameRaw: r.name_raw || r.name, day: r.day, over_ngay: r.over_ngay, over_dem: r.over_dem, bu_ngay: r.bu_ngay, bu_dem: r.bu_dem, confidence: r.confidence })));
+    else I.recs = cellRecs(((out && out.rows) || []).map(r => ({ name: r.name, nameRaw: r.name_raw || r.name, cells: r.cells || {}, confidence: r.confidence })), I.kind);
+    I.step = 'review';
+  } catch (e) {
+    if (!S.imp || S.imp.token !== token) return;
+    I.step = 'source';
+    I.error = e && e.code === 'not_granted' ? 'Bạn chưa cho phép trang dùng Claude đọc ảnh.' : e && e.code === 'rate_limited' ? 'Đang bị giới hạn lượt, thử lại sau ít phút.' : 'Không đọc được: ' + ((e && e.message) || e);
+  }
+  renderImport();
+}
+function impConfirm() {
+  const I = S.imp; const recs = I.recs.filter(r => r.inc);
+  const bad = recs.filter(r => I.kind !== 'plan' ? !r.sid : !S.cfg.slots.some(s => s.id === r.slot));
+  const warnN = recs.filter(r => r.warn && r.warn.length).length;
+  const people = new Set(recs.map(r => r.sid)).size;
+  const sum = I.kind === 'plan' ? recs.length + ' ô lịch bay' : recs.length + ' ô của ' + people + ' nhân viên';
+  const box = '<p style="margin:0">Sẽ nhập <b>' + sum + '</b> vào tuần <b>' + weekName(I.week) + '</b>' + (I.kind === 'assign' ? ' (' + (I.mode === 'replace' ? 'ghi đè ô' : 'bổ sung') + ')' : '') + '.</p>' +
+    (bad.length ? '<div class="issue" style="margin-top:8px">' + bad.length + ' dòng chưa khớp ' + (I.kind === 'plan' ? 'mã slot' : 'nhân viên') + ' sẽ bị bỏ qua.</div>' : '') +
+    (warnN ? '<div class="issue warn" style="margin-top:8px">' + warnN + ' dòng còn cảnh báo. Bạn đã xem lại chưa?</div>' : '') +
+    '<p class="help">Dữ liệu đã chuẩn chưa? Trước khi ghi, máy sẽ tự <b>tạo bản sao lưu</b> của tuần này. Nhập xong vẫn sửa tay được, bấm Hoàn tác, hoặc khôi phục bản sao lưu ở Cài đặt → Nhập / xuất dữ liệu.</p>' +
+    (Store.dl ? '<label class="chk"><input type="checkbox" id="impDl"> Tải thêm file sao lưu về máy</label>' : '');
+  const back = S.imp;
+  modal('Xác nhận nhập dữ liệu', box, [{ label: 'Xem lại', fn: () => { S.imp = back; renderImport(); return true; } }, { label: 'Đúng rồi, sao lưu và nhập', cls: 'pri', fn: async host => {
+    const dl = host.querySelector('#impDl') && host.querySelector('#impDl').checked;
+    host.querySelector('.acts').innerHTML = '<span class="muted">Đang sao lưu…</span>';
+    await impApply(back, dl); return true;
+  } }]);
+}
+async function impApply(I, dl) {
+  if (S.week.start !== I.week) await openWeek(I.week);
+  const meta = await Backup.create('Trước khi nhập ' + IMP_KINDS[I.kind].label.toLowerCase() + ' (' + (I.src === 'image' ? 'ảnh' : I.src === 'csv' ? 'file CSV' : 'văn bản') + ')');
+  if (meta.failed) { closeModal(); toast('Không tạo được bản sao lưu, đã dừng nhập để an toàn.'); return; }
+  if (dl) { try { await Store.dl.save({ filename: 'sao-luu-truoc-khi-nhap-' + new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-') + '.json', data: JSON.stringify({ app: 'phan-ca-san-bay', version: 1, copyright: COPYRIGHT, cfg: S.cfg, weeks: { [S.week.start]: S.week } }) }); } catch (e) {} }
+  const cm = C.codeMap(S.cfg); let n = 0;
+  mutateWeek(w => {
+    for (const r of I.recs) {
+      if (!r.inc) continue;
+      if (I.kind === 'plan') {
+        if (!S.cfg.slots.some(s => s.id === r.slot)) continue;
+        w.plan[r.slot] = w.plan[r.slot] || {};
+        w.plan[r.slot][r.d] = Object.assign({}, C.planOf(S.cfg, w, r.slot, r.d), { on: !!r.on, label: C.norm(r.label) || C.planOf(S.cfg, w, r.slot, r.d).label });
+        n++; continue;
+      }
+      if (!r.sid) continue;
+      if (I.kind === 'ts') {
+        w.over = w.over || {}; w.over[r.sid] = w.over[r.sid] || {}; const o = w.over[r.sid][r.d] = w.over[r.sid][r.d] || {};
+        for (const k of ['on', 'od', 'bn', 'bd']) if (r[k] !== '' && r[k] != null) o[k] = parseFloat(String(r[k]).replace(',', '.')) || 0;
+        n++; continue;
+      }
+      const c = C.ensureCell(w, r.sid, r.d);
+      const st = C.norm(r.status);
+      if (I.kind === 'leave') { c.status = st; c.autoOff = false; if (r.note) c.note = C.norm(r.note); n++; continue; }
+      const pc = C.parseCell(r.items || '', S.cfg, cm);
+      const newItems = pc.items.map(i => Object.assign({ slot: i.slot, role: i.role || '' }, i.tag ? { tag: i.tag } : {}));
+      if (I.mode === 'replace') { c.status = st; c.autoOff = false; c.items = newItems; c.note = C.norm([r.note, pc.note.join('; ')].filter(Boolean).join('; ')); }
+      else {
+        if (st) { c.status = st; c.autoOff = false; }
+        for (const it of newItems) if (!c.items.some(x => x.slot === it.slot)) c.items.push(it);
+        const extra = C.norm([r.note, pc.note.join('; ')].filter(Boolean).join('; ')); if (extra) c.note = C.norm([c.note, extra].filter(Boolean).join('; '));
+      }
+      n++;
+    }
+  }, { noRender: true });
+  S.imp = null; closeModal();
+  S.tab = I.kind === 'ts' ? 'ts' : I.kind === 'plan' ? 'plan' : I.kind === 'leave' ? 'leave' : 'roster';
+  render();
+  modal('Đã nhập ' + n + ' ô', '<p style="margin:0">Đã lưu bản sao lưu "' + esc(meta.label) + '"' + (meta.localOnly ? ' (trên máy này)' : '') + '.</p><p class="help">Bây giờ bạn có thể sửa tay từng ô như bình thường. Nếu nhập sai nhiều, bấm Hoàn tác hoặc khôi phục bản sao lưu.</p>',
+    [{ label: 'Hoàn tác lần nhập này', cls: 'danger', fn: () => { undo(); } }, { label: 'Xem bản sao lưu', fn: () => { setTimeout(openBackups, 0); } }, { label: 'Xong', cls: 'pri' }]);
+}
+document.addEventListener('click', e => {
+  const t = e.target.closest('[data-iact]'); if (!t || !S.imp) return;
+  const I = S.imp, a = t.dataset.iact;
+  const ta0 = $('#impText'); if (ta0) I.text = ta0.value;
+  if (a === 'close') { closeImport(); return; }
+  if (a === 'kind') { I.kind = t.dataset.k; I.error = ''; }
+  else if (a === 'src') { I.src = t.dataset.k; I.error = ''; }
+  else if (a === 'rot') { I.files[+t.dataset.i].rot = (I.files[+t.dataset.i].rot + 90) % 360; }
+  else if (a === 'rmf') { const f = I.files.splice(+t.dataset.i, 1)[0]; if (f && f.url) URL.revokeObjectURL(f.url); }
+  else if (a === 'run-ai') { impRunAI(false); return; }
+  else if (a === 'run-ai-text') { const ta = $('#impText'); if (ta) I.text = ta.value; impRunAI(true); return; }
+  else if (a === 'run-grid') { const ta = $('#impText'); if (ta) I.text = ta.value; impRunGrid(); return; }
+  else if (a === 'xlsx') { closeImport(); $('#fileXlsx').click(); return; }
+  else if (a === 'cancel') { I.token = null; I.step = 'source'; }
+  else if (a === 'back') { I.step = 'source'; }
+  else if (a === 'all') { I.recs.forEach(r => r.inc = t.dataset.v === '1'); I.keepScroll = true; }
+  else if (a === 'confirm') { impConfirm(); return; }
+  renderImport();
+});
+document.addEventListener('change', async e => {
+  const t = e.target; if (!S.imp) return; const I = S.imp;
+  if (t.id === 'impWeek') { I.week = t.value; renderImport(); return; }
+  if (t.id === 'impTsDay') { S.tsDay = +t.value; return; }
+  if (t.id === 'impOnly') { I.onlyIssues = t.checked; renderImport(); return; }
+  if (t.id === 'impMode') { I.mode = t.value; return; }
+  if (t.id === 'impFiles') {
+    for (const f of t.files) I.files.push({ file: f, name: f.name, pdf: f.type === 'application/pdf', url: f.type === 'application/pdf' ? '' : URL.createObjectURL(f), rot: 0 });
+    renderImport(); return;
+  }
+  if (t.id === 'impCsv') {
+    const f = t.files[0]; if (!f) return;
+    I.text = await f.text(); renderImport(); return;
+  }
+  if (t.dataset.ir) {
+    const [i, k] = t.dataset.ir.split('|'); const r = I.recs[+i];
+    if (k === 'inc' || k === 'on') r[k] = t.checked;
+    else if (k === 'd') r.d = +t.value;
+    else if (k === 'sid') { r.sid = t.value; r.score = t.value ? 1 : 0; r.ambiguous = false; }
+    else r[k] = t.value;
+    if (k !== 'note' && k !== 'items' && k !== 'label' && !['on', 'od', 'bn', 'bd'].includes(k) || k === 'inc') { I.keepScroll = true; renderImport(); }
+  }
+}, true);
+function cfgAI() {
+  if (!STANDALONE) return '<label><b>Đọc ảnh bằng AI</b><span>Trên trang này, ảnh được đọc bằng Claude, không cần cài đặt gì. Lần đầu dùng, trang sẽ hỏi quyền.</span><button class="btn pri" data-act="open-import">Nhập từ ảnh / văn bản…</button></label>';
+  const key = Store.lsGet('geminiKey') || '', model = Store.lsGet('geminiModel') || 'gemini-2.5-flash';
+  return '<label style="grid-column:1/-1"><b>Đọc ảnh bằng AI (Google Gemini, miễn phí)</b>' +
+    '<span>1) Mở <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>, đăng nhập Google, bấm <i>Create API key</i>. 2) Dán khoá vào ô dưới. Khoá chỉ lưu trên trình duyệt của máy này, không gửi lên Firebase. Mỗi người làm lịch tự dán trên máy mình.</span>' +
+    '<div class="bar" style="margin:6px 0"><input class="inp" id="gemKey" type="password" placeholder="AIza…" value="' + esc(key) + '" style="flex:1;min-width:200px"><input class="inp" id="gemModel" value="' + esc(model) + '" style="width:170px" aria-label="Model"><button class="btn pri" data-act="gem-save">Lưu khoá</button>' + (key ? '<button class="btn danger" data-act="gem-del">Xoá khoá</button>' : '') + '</div>' +
+    '<span class="muted">Lưu ý: ở gói miễn phí, Google có thể dùng nội dung gửi lên để cải thiện sản phẩm. Nếu ảnh có thông tin nhạy cảm, hãy cân nhắc hoặc dùng cách Dán văn bản.</span></label>';
+}
+
 boot();
 })();
 
