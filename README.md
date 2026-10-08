@@ -85,6 +85,14 @@ Trong Firebase, vào **Authentication → Settings → Authorized domains**, b�
 
 ---
 
+## Quy trình mỗi tuần (người làm lịch)
+
+1. **+ Tuần mới**: chép lịch bay từ tuần trước làm khung.
+2. **Lịch bay**: sửa chuyến đổi giờ, bấm BAY/CANX cho chuyến huỷ, đặt định mức riêng nếu cần. Hoặc **Nhập file Excel → Chỉ lịch bay**.
+3. **Order nghỉ**: chọn OFF, NP, ốm… cho từng người từng ngày. Hoặc **Nhập file Excel → Chỉ OFF / NP**.
+4. **Tự động chia**. Nếu sửa OFF/NP sau khi đã chia, bấm lại **Tự động chia → Chỉ lấp chỗ trống**: người mới nghỉ sẽ được gỡ khỏi chuyến (trừ ô đã khoá) và xếp người thay.
+5. Kiểm tra **bảng đếm quân số cuối tab Lịch tuần** (giống hàm COUNT cuối bảng Excel) hoặc tab **Quân số**: ô đỏ là chuyến còn thiếu người.
+
 ## Dùng hằng ngày
 
 - **Nhân viên:** mở link, đăng nhập bằng Google, hoặc bấm *Tạo tài khoản* bằng email rồi xác minh qua thư. Họ chỉ xem được Lịch tuần, Quân số, Thống kê. Gõ tên vào ô tìm kiếm để xem lịch của mình. Lịch tự cập nhật khi người làm lịch sửa.
