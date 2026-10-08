@@ -57,6 +57,15 @@
 .or::before,.or::after{content:"";flex:1;height:1px;background:var(--line)}
 .fl{display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(--ink2)}
 .fl .inp{padding:9px 10px}
+.foothead td{background:var(--accentSoft)!important;color:var(--ink)!important}
+tr.foot td.cv{padding:4px 6px}
+tr.foot td.cv b{font-size:13px}
+tr.foot.tot td{background:var(--panel2);font-weight:600}
+tr.foot.tot td.sum.hi{color:var(--err)}
+td.lvc{min-width:118px}
+td.lvc select{width:100%;font-weight:600}
+td.lvc.k-off{background:var(--offSoft)} td.lvc.k-leave{background:var(--leaveSoft)} td.lvc.k-sby{background:var(--sbySoft)}
+td.lvc.autoff select{border-style:dashed}
 .issue.okk{background:var(--okSoft);color:var(--ok)}
 
 .ro td.cell{cursor:default}
@@ -271,6 +280,7 @@ td.c{text-align:center}
   </div>
   <nav class="tabs" id="tabs">
     <button class="tab" data-tab="roster">Lịch tuần</button>
+    <button class="tab edit-only" data-tab="leave">Order nghỉ</button>
     <button class="tab" data-tab="cov">Quân số</button>
     <button class="tab edit-only" data-tab="plan">Lịch bay</button>
     <button class="tab" data-tab="stats">Thống kê</button>
@@ -664,6 +674,12 @@ const Core = (() => {
     for (const sf of allStaff) for (let d = 0; d < 7; d++) {
       const c = cellOf(week, sf.id, d); if (!c) continue;
       c.items = (c.items || []).filter(i => i.lock || planOf(cfg, week, i.slot, d).on);
+      // gỡ phân công (không khoá) trùng với trạng thái nghỉ mới nhập (OFF, NP, ốm…)
+      const code = statusCode(cfg, cm, c);
+      if (code && code.block !== 'none') {
+        const br = blockRange(code.block, d);
+        c.items = c.items.filter(i => { if (i.lock || !sm[i.slot]) return true; const w = windowOf(cfg, week, sm[i.slot], d); return !(br && w.s < br[1] && w.e > br[0]); });
+      }
     }
     // 2. tự thêm ngày OFF
     if (r.autoOff) {
@@ -1039,7 +1055,7 @@ const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&a
 const S = {
   cfg: null, week: null, weeks: [], tab: 'roster', sel: null, covSel: null, drawer: null,
   filter: { group: 0, q: '', issues: false }, undo: [], redo: [], tsDay: 0, cfgTab: 'staff',
-  val: null, st: null, ready: false, roleAdd: 'auto'
+  val: null, st: null, ready: false, roleAdd: 'auto', showFoot: (() => { try { return localStorage.getItem('pcsb:foot') !== '0'; } catch (e) { return true; } })()
 };
 
 /* ================= LƯU TRỮ ================= */
@@ -1395,7 +1411,7 @@ async function loadData() {
   } catch (e) { Store.error = 'Không đọc được dữ liệu: ' + (e.message || e.code); }
   if (!S.cfg) S.cfg = C.emptyConfig();
   migrateCfg(S.cfg);
-  if (S.ro && ['plan', 'ts', 'cfg'].includes(S.tab)) S.tab = 'roster';
+  if (S.ro && ['plan', 'ts', 'cfg', 'leave'].includes(S.tab)) S.tab = 'roster';
   let start = null;
   const todayMon = C.mondayOf(C.isoDate(new Date()));
   if (S.weeks.includes(todayMon)) start = todayMon; else if (S.weeks.length) start = S.weeks[S.weeks.length - 1];
@@ -1428,7 +1444,7 @@ function render() {
   const m = $('#main');
   if (!S.ready) { m.innerHTML = '<div class="empty"><h2>Đang tải dữ liệu…</h2><p>Đang kết nối tới kho dữ liệu của trang.</p></div>'; return; }
   if (!S.week) { m.innerHTML = emptyView(); return; }
-  const v = { roster: viewRoster, cov: viewCov, plan: viewPlan, stats: viewStats, ts: viewTs, cfg: viewCfg }[S.tab];
+  const v = { roster: viewRoster, leave: viewLeave, cov: viewCov, plan: viewPlan, stats: viewStats, ts: viewTs, cfg: viewCfg }[S.tab];
   const sx = document.querySelector('.scroll'); const keep = sx ? [sx.scrollLeft, sx.scrollTop] : null;
   m.innerHTML = v();
   const nx = document.querySelector('.scroll'); if (nx && keep && S._keepScroll !== false) { nx.scrollLeft = keep[0]; nx.scrollTop = keep[1]; }
@@ -1480,6 +1496,8 @@ function viewRoster() {
     '<input class="inp" id="fq" placeholder="Tìm nhân viên…" value="' + esc(S.filter.q) + '" style="width:180px">' +
     '<select class="sel" id="fg"><option value="0">Tất cả nhóm</option>' + S.cfg.groups.map(g => '<option value="' + g.id + '"' + (S.filter.group === g.id ? ' selected' : '') + '>' + esc(g.name) + '</option>').join('') + '</select>' +
     '<label class="chk"><input type="checkbox" id="fi"' + (S.filter.issues ? ' checked' : '') + '> Chỉ người có cảnh báo</label>' +
+    '<label class="chk"><input type="checkbox" id="ffoot"' + (S.showFoot ? ' checked' : '') + '> Đếm quân số cuối bảng</label>' +
+    (S.showFoot ? '<button class="btn sm" data-act="go-foot">↓ Xuống bảng đếm</button>' : '') +
     '<span class="spacer"></span>' +
     '<button class="btn edit-only" data-act="lock-all">Khoá phân công hiện có</button>' +
     '<button class="btn edit-only" data-act="clear-auto">Xoá phân công chưa khoá</button>' +
@@ -1495,8 +1513,42 @@ function viewRoster() {
   }
   const orphan = list.filter(s => !S.cfg.groups.some(g => g.id === s.group));
   if (orphan.length) { h += '<tr class="grp"><td class="stick">Chưa phân nhóm</td><td colspan="12"></td></tr>'; orphan.forEach(sf => h += rosterRow(sf)); }
+  if (S.showFoot) h += rosterFoot();
   h += '</tbody></table></div>';
   if (!S.cfg.staff.length) h += '<p class="help">Chưa có nhân viên. Thêm ở <a href="#" data-act="go-cfg">Cài đặt → Nhân viên</a> hoặc nhập file Excel.</p>';
+  return h;
+}
+function rosterFoot() {
+  const cov = S.val.cov, w = S.week, cm = C.codeMap(S.cfg);
+  let h = '<tr class="grp foothead" id="footAnchor"><td class="stick">Đếm quân số theo chuyến · đã xếp / cần</td><td colspan="12"></td></tr>';
+  let shortWeek = [0, 0, 0, 0, 0, 0, 0];
+  for (const s of S.cfg.slots) {
+    const row = cov[s.id]; let any = false, wShort = 0;
+    for (let d = 0; d < 7; d++) { if ((row[d].on && row[d].needT) || row[d].haveT) any = true; if (row[d].on) { wShort += row[d].short; shortWeek[d] += row[d].short; } }
+    if (!any) continue;
+    h += '<tr class="foot"><td class="stick slotname">' + esc(s.id) + '<small>' + esc(s.flight) + ' · ' + C.fmtTime(s.time) + '</small></td><td></td>';
+    for (let d = 0; d < 7; d++) {
+      const x = row[d];
+      const cls = !x.on ? (x.haveT ? 'over' : 'off') : x.short ? 'short' : x.over ? 'over' : 'ok';
+      const roles = ['S', 'C', 'G', 'GC', 'SE'].filter(r => +x.need[r] && (x.have[r] || 0) < +x.need[r]).map(r => 'thiếu /' + r);
+      h += '<td class="cv ' + cls + '" data-act="foot-cov" data-slot="' + s.id + '" data-d="' + d + '" title="' + esc(x.label + (x.short ? ' · thiếu ' + x.short + ' người' : '') + (roles.length ? ' (' + roles.join(', ') + ')' : '')) + '">' +
+        (x.on ? '<b>' + x.haveT + '/' + x.needT + '</b>' + (roles.length ? '<small>' + esc(roles.join(' ')) + '</small>' : '') : '<b>' + (x.haveT ? 'CANX·' + x.haveT : '—') + '</b>') + '</td>';
+    }
+    h += '<td class="sum' + (wShort ? ' hi' : '') + '" colspan="4">' + (wShort ? 'thiếu ' + wShort : '✓') + '</td></tr>';
+  }
+  // tổng theo ngày
+  const cnt = k => [0, 1, 2, 3, 4, 5, 6].map(d => S.cfg.staff.reduce((a, sf) => { const c = C.cellOf(w, sf.id, d); return a + k(c, sf); }, 0));
+  const code = c => c && c.status ? cm[C.key(c.status)] : null;
+  const rows = [
+    ['Tổng vị trí còn thiếu', shortWeek, v => v ? 'short' : 'ok'],
+    ['Số người đi làm', cnt(c => c && (c.items || []).length ? 1 : 0)],
+    ['OFF', cnt(c => { const k = code(c); return k && k.kind === 'off' ? (+k.off || 0) : 0; })],
+    ['Phép / ốm / thai sản', cnt(c => { const k = code(c); return k && k.kind === 'leave' ? 1 : 0; })],
+    ['Standby (SBY)', cnt(c => { const k = code(c); return k && k.kind === 'sby' ? 1 : 0; })]
+  ];
+  for (const [label, arr, clsF] of rows) {
+    h += '<tr class="foot tot"><td class="stick"><b>' + label + '</b></td><td></td>' + arr.map(v => '<td class="sum' + (clsF ? ' ' + (v ? 'hi' : '') : '') + '" style="text-align:center">' + fmtN(v) + '</td>').join('') + '<td colspan="4"></td></tr>';
+  }
   return h;
 }
 function rosterRow(sf) {
@@ -1527,6 +1579,39 @@ function rosterRow(sf) {
 const fmtN = x => (Math.round(x * 100) / 100).toString().replace('.', ',');
 function dayIndexToday() { if (!S.week) return -1; const t = C.isoDate(new Date()); for (let d = 0; d < 7; d++) if (C.addDays(S.week.start, d) === t) return d; return -1; }
 
+/* ---------- Order nghỉ ---------- */
+function viewLeave() {
+  const w = S.week, cm = C.codeMap(S.cfg);
+  const list = staffList().filter(s => s.active || s.kind === 'flight');
+  const order = ['off', 'leave', 'sby', 'duty'];
+  const codes = S.cfg.codes.slice().sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind));
+  const kname = { off: 'Nghỉ (tính OFF)', leave: 'Phép / ốm', sby: 'Standby', duty: 'Việc khác' };
+  const opts = cur => '<option value="">—</option>' + order.map(k => '<optgroup label="' + kname[k] + '">' + codes.filter(c => c.kind === k).map(c => '<option value="' + esc(c.code) + '"' + (C.key(c.code) === C.key(cur) ? ' selected' : '') + '>' + esc(c.code) + '</option>').join('') + '</optgroup>').join('') + (cur && !cm[C.key(cur)] ? '<option selected value="' + esc(cur) + '">' + esc(cur) + '</option>' : '');
+  const per = [0, 1, 2, 3, 4, 5, 6].map(d => { let off = 0, lv = 0; for (const sf of S.cfg.staff) { const c = C.cellOf(w, sf.id, d); const k = c && c.status ? cm[C.key(c.status)] : null; if (k && k.kind === 'off') off += +k.off || 0; if (k && k.kind === 'leave') lv++; } return { off, lv }; });
+  let h = '<div class="bar"><span class="help">Nhập OFF, nghỉ phép, ốm… của tuần này trước khi bấm Tự động chia. Chọn trong ô là lưu ngay. Người đã có chuyến mà nhập nghỉ sẽ báo đỏ ở Lịch tuần; bấm Tự động chia → Chỉ lấp chỗ trống để gỡ ra và xếp người thay.</span><span class="spacer"></span>' +
+    '<input class="inp" id="fq" placeholder="Tìm nhân viên…" value="' + esc(S.filter.q) + '" style="width:170px">' +
+    '<button class="btn" data-act="leave-clear">Xoá hết OFF tự thêm</button><button class="btn pri" data-act="auto">Tự động chia</button></div>';
+  h += '<div class="scroll"><table class="g lv"><thead><tr><th class="stick">Nhân viên</th>';
+  for (let d = 0; d < 7; d++) h += '<th>' + C.dayLabel(w.start, d) + '<div class="muted" style="font-weight:400">OFF ' + fmtN(per[d].off) + ' · phép/ốm ' + per[d].lv + '</div></th>';
+  h += '<th>Tổng OFF</th></tr></thead><tbody>';
+  for (const g of S.cfg.groups) {
+    const rows = list.filter(s => s.group === g.id); if (!rows.length) continue;
+    h += '<tr class="grp"><td class="stick">' + esc(g.name) + '</td><td colspan="8"></td></tr>';
+    for (const sf of rows) {
+      let tot = 0;
+      h += '<tr><td class="stick name gc' + sf.group + '">' + esc(sf.name) + '</td>';
+      for (let d = 0; d < 7; d++) {
+        const c = C.cellOf(w, sf.id, d); const k = c && c.status ? cm[C.key(c.status)] : null;
+        if (k && k.kind === 'off') tot += +k.off || 0;
+        const busy = c && (c.items || []).length;
+        h += '<td class="lvc k-' + (k ? k.kind : '') + (c && c.autoOff ? ' autoff' : '') + '"><select class="sel sm" data-lv="' + sf.id + '|' + d + '" aria-label="' + esc(sf.name + ' ' + DAYS[d]) + '">' + opts(c ? c.status : '') + '</select>' + (busy ? '<div class="its" style="margin-top:3px">' + c.items.map(i => chipHtml(i, d)).join('') + '</div>' : '') + '</td>';
+      }
+      h += '<td class="sum' + (tot < S.cfg.rules.minOffPerWeek ? ' hi' : '') + '">' + fmtN(tot) + '</td></tr>';
+    }
+  }
+  return h + '</tbody></table></div>';
+}
+
 /* ---------- Quân số ---------- */
 function viewCov() {
   const cov = S.val.cov, w = S.week;
@@ -1539,7 +1624,7 @@ function viewCov() {
   h += '<th>Tuần</th></tr></thead><tbody>';
   for (const s of S.cfg.slots) {
     const row = cov[s.id]; let any = false, wn = 0, wh = 0;
-    for (let d = 0; d < 7; d++) { if (row[d].on || row[d].haveT) any = true; wn += row[d].on ? row[d].needT : 0; wh += row[d].haveT; }
+    for (let d = 0; d < 7; d++) { if ((row[d].on && row[d].needT) || row[d].haveT) any = true; wn += row[d].on ? row[d].needT : 0; wh += row[d].haveT; }
     if (!any) continue;
     h += '<tr><td class="stick slotname">' + esc(s.id) + '<small>' + esc(s.flight) + ' · ' + C.fmtTime(s.time) + (s.night ? ' · đêm' : '') + '</small></td>';
     for (let d = 0; d < 7; d++) {
@@ -1959,11 +2044,35 @@ async function importXlsx() {
     const exists = S.weeks.includes(res.week.start);
     const newStaff = res.cfg.staff.length - S.cfg.staff.length;
     const nItems = Object.values(res.week.cells).reduce((a, x) => a + Object.values(x).reduce((b, c) => b + (c.items || []).length, 0), 0);
-    modal('Nhập file ' + f.name, '<p style="margin:0">Sheet <b>' + esc(name) + '</b> · tuần <b>' + weekName(res.week.start) + '</b></p><ul class="help"><li>' + res.cfg.staff.length + ' nhân viên (' + (newStaff > 0 ? newStaff + ' người mới' : 'không có người mới') + ')</li><li>' + nItems + ' lượt phân công chuyến</li><li>Lịch bay theo ngày, có đánh dấu CANX</li></ul>' + (exists ? '<p style="color:var(--warn)">Tuần này đã có dữ liệu. Nhập sẽ ghi đè tuần đó.</p>' : ''),
-      [{ label: 'Huỷ' }, { label: exists ? 'Ghi đè tuần' : 'Nhập', cls: 'pri', fn: () => {
+    const nLeave = Object.values(res.week.cells).reduce((a, x) => a + Object.values(x).filter(c => c.status).length, 0);
+    modal('Nhập file ' + f.name, '<p style="margin:0">Sheet <b>' + esc(name) + '</b> · tuần <b>' + weekName(res.week.start) + '</b>: ' + res.cfg.staff.length + ' nhân viên' + (newStaff > 0 ? ' (' + newStaff + ' người mới)' : '') + ', ' + nItems + ' lượt phân công, ' + nLeave + ' ô trạng thái (OFF, NP…).</p>' +
+      '<label class="opt"><input type="radio" name="im" value="plan"' + (exists ? ' checked' : '') + '><div><b>Chỉ lịch bay</b><span>Cập nhật chuyến bay, giờ và CANX theo file. Giữ nguyên phân công và trạng thái đang có.</span></div></label>' +
+      '<label class="opt"><input type="radio" name="im" value="leave"><div><b>Chỉ OFF / NP / trạng thái</b><span>Lấy phần trạng thái (OFF, NP, ốm, họp…) của file. Giữ nguyên phân công chuyến.</span></div></label>' +
+      '<label class="opt"><input type="radio" name="im" value="plan+leave"><div><b>Lịch bay + OFF/NP (để tự chia)</b><span>Dùng khi file mới chỉ có lịch bay và order nghỉ, chưa chia chuyến.</span></div></label>' +
+      '<label class="opt"><input type="radio" name="im" value="all"' + (exists ? '' : ' checked') + '><div><b>Toàn bộ</b><span>' + (exists ? 'Ghi đè cả tuần bằng nội dung file.' : 'Tạo tuần mới từ file.') + '</span></div></label>',
+      [{ label: 'Huỷ' }, { label: 'Nhập', cls: 'pri', fn: async host => {
+        const mode = host.querySelector('input[name=im]:checked').value;
         S.cfg = res.cfg; migrateCfg(S.cfg); Store.save('cfg');
-        S.week = res.week; S.weeks = [...new Set([...S.weeks, res.week.start])].sort(); S.undo = []; S.redo = [];
-        recompute(); Store.save('week', S.week.start); S.tab = 'roster'; render(); Store.watch(); toast('Đã nhập tuần ' + weekName(S.week.start));
+        const start = res.week.start;
+        if (mode === 'all') {
+          S.week = res.week;
+        } else {
+          let w = exists ? (S.week && S.week.start === start ? S.week : await Store.getWeek(start)) : null;
+          if (!w) w = C.newWeek(S.cfg, start, S.week && S.week.start < start ? S.week : null);
+          if (mode.includes('plan')) w.plan = res.week.plan;
+          if (mode.includes('leave')) {
+            for (const sf of S.cfg.staff) for (let d = 0; d < 7; d++) {
+              const src = C.cellOf(res.week, sf.id, d); const dst = C.cellOf(w, sf.id, d);
+              if (src && src.status) { const c = C.ensureCell(w, sf.id, d); c.status = src.status; c.autoOff = false; if (src.note && !c.note) c.note = src.note; }
+              else if (dst && dst.status && !dst.autoOff) { dst.status = ''; }
+            }
+          }
+          if (S.week && S.week.start === start) S.undo.push(snapshot());
+          S.week = w;
+        }
+        S.weeks = [...new Set([...S.weeks, start])].sort();
+        recompute(); Store.save('week', start); S.tab = mode === 'plan' ? 'plan' : mode.includes('leave') && mode !== 'all' ? 'leave' : 'roster'; render(); Store.watch();
+        toast({ all: 'Đã nhập toàn bộ tuần ', plan: 'Đã cập nhật lịch bay tuần ', leave: 'Đã cập nhật OFF/NP tuần ', 'plan+leave': 'Đã nhập lịch bay và OFF/NP tuần ' }[mode] + weekName(start));
       } }]);
   };
   if (pick.length === 1) go(pick[0]);
@@ -2023,9 +2132,12 @@ document.addEventListener('click', async e => {
     }
     case 'it-del': { const { sid, d } = S.sel; mutateWeek(w => { C.cellOf(w, sid, d).items.splice(+t.dataset.i, 1); }); break; }
     case 'it-lock': { const { sid, d } = S.sel; mutateWeek(w => { const it = C.cellOf(w, sid, d).items[+t.dataset.i]; it.lock = !it.lock; }); break; }
+    case 'go-foot': { const a = $('#footAnchor'); if (a) a.scrollIntoView({ block: 'start' }); break; }
+    case 'foot-cov': S.tab = 'cov'; S.covSel = { slot: t.dataset.slot, d: +t.dataset.d }; S.covRole = null; render(); break;
     case 'cov': S.covSel = { slot: t.dataset.slot, d: +t.dataset.d }; S.covRole = null; render(); break;
     case 'cov-add': { const { slot, d } = S.covSel; const sid = t.dataset.sid, role = t.dataset.role || ''; mutateWeek(w => { C.ensureCell(w, sid, d).items.push({ slot, role }); }); break; }
     case 'cov-del': { const { slot, d } = S.covSel; const sid = t.dataset.sid; mutateWeek(w => { const c = C.cellOf(w, sid, d); c.items = c.items.filter(i => i.slot !== slot); }); break; }
+    case 'leave-clear': mutateWeek(w => { for (const sid in w.cells) for (const d in w.cells[sid]) { const c = w.cells[sid][d]; if (c.autoOff) { c.status = ''; c.autoOff = false; } } }); toast('Đã xoá các OFF do máy tự thêm'); break;
     case 'lock-all': mutateWeek(w => { for (const sid in w.cells) for (const d in w.cells[sid]) (w.cells[sid][d].items || []).forEach(i => i.lock = true); }); toast('Đã khoá mọi phân công hiện có'); break;
     case 'clear-auto':
       modal('Xoá phân công chưa khoá?', '<p style="margin:0">Mọi chuyến chưa khoá 🔒 sẽ bị bỏ, OFF tự thêm cũng bị bỏ. Trạng thái bạn nhập tay vẫn giữ. Có thể hoàn tác.</p>', [{ label: 'Huỷ' }, { label: 'Xoá', cls: 'danger', fn: () => {
@@ -2090,6 +2202,14 @@ document.addEventListener('change', e => {
   if (t.id === 'fileJson') { importJson(); return; }
   if (t.id === 'fg') { S.filter.group = +t.value; render(); return; }
   if (t.id === 'fi') { S.filter.issues = t.checked; render(); return; }
+  if (t.id === 'ffoot') { S.showFoot = t.checked; try { localStorage.setItem('pcsb:foot', t.checked ? '1' : '0'); } catch (e) {} render(); return; }
+  if (t.dataset.lv) {
+    const [sid, d] = t.dataset.lv.split('|'); const v = t.value;
+    mutateWeek(w => { const c = C.ensureCell(w, sid, +d); c.status = v; c.autoOff = false; });
+    const c = C.cellOf(S.week, sid, +d); const k = codeOf(v);
+    if (k && k.block !== 'none' && c && (c.items || []).length) toast('Người này đang có chuyến hôm đó. Bấm Tự động chia → Chỉ lấp chỗ trống để gỡ và xếp người khác.');
+    return;
+  }
   if (t.id === 'edRoleAdd') { S.roleAdd = t.value; render(); return; }
   if (t.id === 'covRole') { S.covRole = t.value; render(); return; }
   if (t.id === 'edStatus' || t.id === 'edNote') {
