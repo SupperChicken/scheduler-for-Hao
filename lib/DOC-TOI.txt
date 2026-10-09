@@ -1,0 +1,2 @@
+Thư viện dùng cho Phân Ca Sân Bay. Tải cả thư mục lib lên kho GitHub, cùng chỗ với index.html.
+© 2026 ThienNV · thiennv@vnpt-technology.vn · 0888.99.33.00
