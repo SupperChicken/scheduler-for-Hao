@@ -162,6 +162,11 @@ Khi tuần đã chạy xong và chấm công xong, bấm **🔒 Chốt tuần** 
 - **Thêm hoặc bớt người:** sửa danh sách ở *Quyền truy cập*. Người bị xoá mất quyền ngay lập tức.
 - **Sao lưu:** thỉnh thoảng bấm *Tải bản sao lưu* để giữ một bản trên máy, phòng khi xoá nhầm.
 
+## Tốc độ và bộ nhớ đệm
+
+- Trang lưu một bản dữ liệu trong trình duyệt (bộ nhớ đệm của Firebase). Người xem mở lại trang gần như tức thì, bản mới nhất từ máy chủ tự cập nhật sau đó vài giây. Người làm lịch luôn đọc bản mới nhất từ máy chủ trước khi sửa.
+- Trên **máy dùng chung**, nhớ bấm **Đăng xuất**: trang sẽ xoá bộ nhớ đệm trên máy đó.
+
 ## Hạn mức miễn phí
 
 Gói Spark của Firestore cho khoảng 50.000 lượt đọc, 20.000 lượt ghi mỗi ngày và 1 GB lưu trữ. Với khoảng 80 người xem vài lần mỗi ngày, mức dùng chỉ khoảng vài nghìn lượt, còn rất xa giới hạn. Nếu một ngày bị vượt, trang chỉ tạm không lưu được đến hôm sau và không mất tiền, vì gói Spark không có thẻ thanh toán.

@@ -5,6 +5,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="robots" content="noindex,nofollow">
+<link rel="preconnect" href="https://firestore.googleapis.com" crossorigin>
+<link rel="preconnect" href="https://identitytoolkit.googleapis.com" crossorigin>
+<link rel="preconnect" href="https://securetoken.googleapis.com" crossorigin>
+<link rel="dns-prefetch" href="https://www.gstatic.com">
 <meta name="author" content="ThienNV - thiennv@vnpt-technology.vn - 0888.99.33.00">
 <style>[hidden]{display:none!important}img{max-width:100%}</style>
 </head>
@@ -1720,16 +1724,23 @@ const Store = {
   get D() { return this.mode === 'fb' ? FBX.fs : this.db; },
   lsGet(k) { try { const v = localStorage.getItem('pcsb:' + k); return v ? JSON.parse(v) : null; } catch (e) { return null; } },
   lsSet(k, v) { try { localStorage.setItem('pcsb:' + k, JSON.stringify(v)); return true; } catch (e) { return false; } },
+  // người xem: đọc bản trên máy trước cho nhanh, bản mới nhất từ máy chủ sẽ tự cập nhật qua watch()
+  async rd(ref, isCol) {
+    if (this.mode === 'fb' && S.ro && FBX.persist) {
+      try { const s = await ref.get({ source: 'cache' }); if (isCol ? s.docs.length : s.exists) { this.fromCache = true; return s; } } catch (e) {}
+    }
+    return ref.get();
+  },
   async getConfig() {
     if (this.mode === 'db' || this.mode === 'fb') {
-      const s = await this.D.doc('config/main').get(); const c = s.exists ? s.data().cfg : null;
+      const s = this.mode === 'fb' ? await this.rd(this.D.doc('config/main')) : await this.D.doc('config/main').get(); const c = s.exists ? s.data().cfg : null;
       this.base.cfg = c ? C.clone(c) : undefined; return c;
     }
     return this.lsGet('config');
   },
   async listWeeks() {
     if (this.mode === 'fb') {
-      const s = await FBX.fs.doc('config/weeks').get();
+      const s = await this.rd(FBX.fs.doc('config/weeks'));
       if (s.exists) return (s.data().list || []).slice().sort();
       const q = await FBX.fs.collection('weeks').get(); return q.docs.map(d => d.id).sort();
     }
@@ -1738,11 +1749,13 @@ const Store = {
   },
   async getWeek(start) {
     if (this.mode === 'fb') {
-      const s = await FBX.fs.doc('weeks/' + start).get(); if (!s.exists) return null;
+      // đọc song song phần chung và 7 ngày: 1 lượt chờ mạng thay vì 2
+      const [s, q0] = await Promise.all([this.rd(FBX.fs.doc('weeks/' + start)), this.rd(FBX.fs.collection('weeks/' + start + '/days'), true).catch(() => null)]);
+      if (!s.exists) return null;
       const d = s.data(); let w;
       if (d.week) { this.legacy[start] = true; w = d.week; } // dữ liệu kiểu cũ: lần lưu tới sẽ tự chuyển sang kiểu mới
       else {
-        const q = await FBX.fs.collection('weeks/' + start + '/days').get();
+        const q = q0 && q0.docs.length ? q0 : await FBX.fs.collection('weeks/' + start + '/days').get();
         const days = []; q.docs.forEach(x => { days[+x.id] = x.data(); });
         w = joinWeek(d.meta, days); this.legacy[start] = false;
       }
@@ -2019,6 +2032,8 @@ async function resolveRole() {
 async function authGate() {
   firebase.initializeApp(window.FIREBASE_CONFIG);
   FBX.auth = firebase.auth(); FBX.fs = firebase.firestore();
+  // bộ nhớ đệm trên máy (IndexedDB): mở lại trang nhanh hơn, tốn ít lượt đọc hơn, vẫn đồng bộ với máy chủ
+  try { if (FBX.fs.enablePersistence) FBX.fs.enablePersistence({ synchronizeTabs: true }).then(() => { FBX.persist = true; }).catch(() => {}); } catch (e) {}
   try { FBX.auth.languageCode = 'vi'; } catch (e) {}
   try { await FBX.auth.getRedirectResult(); } catch (e) { S.authErr = authMsg(e); }
   return new Promise(resolve => {
@@ -2108,8 +2123,7 @@ async function boot() {
 async function loadData() {
   document.body.classList.remove('gate');
   try {
-    S.cfg = await Store.getConfig();
-    S.weeks = await Store.listWeeks();
+    [S.cfg, S.weeks] = await Promise.all([Store.getConfig(), Store.listWeeks()]);
   } catch (e) { Store.error = 'Không đọc được dữ liệu: ' + (e.message || e.code); }
   if (!S.cfg) S.cfg = C.emptyConfig();
   migrateCfg(S.cfg);
@@ -2308,6 +2322,15 @@ const fmtN = x => (Math.round(x * 100) / 100).toString().replace('.', ',');
 function dayIndexToday() { if (!S.week) return -1; const t = C.isoDate(new Date()); for (let d = 0; d < 7; d++) if (C.addDays(S.week.start, d) === t) return d; return -1; }
 
 /* ---------- Order nghỉ ---------- */
+let LV_OPTS = '';
+// Order nghỉ: mỗi ô chỉ tạo danh sách mã khi được bấm vào (nhanh hơn ~10 lần với 500 ô)
+function fillLazySelect(sel) {
+  if (!sel || !sel.dataset.lazy) return;
+  const cur = sel.value; delete sel.dataset.lazy;
+  sel.innerHTML = LV_OPTS; sel.value = cur;
+  if (sel.value !== cur && cur) { const o = document.createElement('option'); o.value = cur; o.textContent = cur; sel.prepend(o); sel.value = cur; }
+}
+['pointerdown', 'focusin', 'keydown', 'touchstart'].forEach(ev => document.addEventListener(ev, e => { const s = e.target && e.target.closest && e.target.closest('select[data-lazy]'); if (s) fillLazySelect(s); }, true));
 function viewLeave() {
   const w = S.week, cm = C.codeMap(S.cfg);
   const list = staffList().filter(s => s.active || s.kind === 'flight');
@@ -2315,6 +2338,8 @@ function viewLeave() {
   const codes = S.cfg.codes.slice().sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind));
   const kname = { off: 'Nghỉ (tính OFF)', leave: 'Phép / ốm', sby: 'Standby', duty: 'Việc khác' };
   const opts = cur => '<option value="">—</option>' + order.map(k => '<optgroup label="' + kname[k] + '">' + codes.filter(c => c.kind === k).map(c => '<option value="' + esc(c.code) + '"' + (C.key(c.code) === C.key(cur) ? ' selected' : '') + '>' + esc(c.code) + '</option>').join('') + '</optgroup>').join('') + (cur && !cm[C.key(cur)] ? '<option selected value="' + esc(cur) + '">' + esc(cur) + '</option>' : '');
+  LV_OPTS = opts('');
+  const optsLite = cur => cur ? '<option value="' + esc(cur) + '" selected>' + esc(cur) + '</option>' : '<option value="">—</option>';
   const per = [0, 1, 2, 3, 4, 5, 6].map(d => { let off = 0, lv = 0; for (const sf of S.cfg.staff) { const c = C.cellOf(w, sf.id, d); const k = c && c.status ? cm[C.key(c.status)] : null; if (k && k.kind === 'off') off += +k.off || 0; if (k && k.kind === 'leave') lv++; } return { off, lv }; });
   let h = '<div class="bar"><span class="help">Nhập OFF, nghỉ phép, ốm… của tuần này trước khi bấm Tự động chia. Chọn trong ô là lưu ngay. Người đã có chuyến mà nhập nghỉ sẽ báo đỏ ở Lịch tuần; bấm Tự động chia → Chỉ lấp chỗ trống để gỡ ra và xếp người thay.</span><span class="spacer"></span>' +
     '<input class="inp" id="fq" placeholder="Tìm nhân viên…" value="' + esc(S.filter.q) + '" style="width:170px">' +
@@ -2332,7 +2357,7 @@ function viewLeave() {
         const c = C.cellOf(w, sf.id, d); const k = c && c.status ? cm[C.key(c.status)] : null;
         if (k && k.kind === 'off') tot += +k.off || 0;
         const busy = c && (c.items || []).length;
-        h += '<td class="lvc k-' + (k ? k.kind : '') + (c && c.autoOff ? ' autoff' : '') + '"><select class="sel sm" data-lv="' + sf.id + '|' + d + '" aria-label="' + esc(sf.name + ' ' + DAYS[d]) + '">' + opts(c ? c.status : '') + '</select>' + (busy ? '<div class="its" style="margin-top:3px">' + c.items.map(i => chipHtml(i, d)).join('') + '</div>' : '') + '</td>';
+        h += '<td class="lvc k-' + (k ? k.kind : '') + (c && c.autoOff ? ' autoff' : '') + '"><select class="sel sm" data-lv="' + sf.id + '|' + d + '" data-lazy="1" aria-label="' + esc(sf.name + ' ' + DAYS[d]) + '">' + optsLite(c ? c.status : '') + '</select>' + (busy ? '<div class="its" style="margin-top:3px">' + c.items.map(i => chipHtml(i, d)).join('') + '</div>' : '') + '</td>';
       }
       h += '<td class="sum' + (tot < S.cfg.rules.minOffPerWeek ? ' hi' : '') + '">' + fmtN(tot) + '</td></tr>';
     }
@@ -3001,7 +3026,7 @@ document.addEventListener('click', async e => {
     case 'gem-test': t.disabled = true; try { await testSharedKey(); toast('Khoá hoạt động tốt'); } catch (e) { toast('Lỗi: ' + e.message); } t.disabled = false; break;
     case 'gem-edit': { const f = $('#gemForm'); if (f) f.hidden = false; break; }
     case 'gem-del': try { await delSharedKey(); toast('Đã tắt AI đọc ảnh'); } catch (e) { toast('Không tắt được: ' + (e.code === 'permission-denied' ? 'không có quyền' : e.message)); } render(); break;
-    case 'signout': if (FBX.auth) { Store.unsub.forEach(u => { try { u(); } catch (e) {} }); await FBX.auth.signOut(); location.reload(); } break;
+    case 'signout': if (FBX.auth) { Store.unsub.forEach(u => { try { u(); } catch (e) {} }); for (const k of Object.keys(Store.pending)) { try { await (k === 'cfg' ? Store.flush('cfg') : Store.flush('week', k.slice(5))); } catch (e) {} } await FBX.auth.signOut(); try { await FBX.fs.terminate(); await FBX.fs.clearPersistence(); } catch (e) {} location.reload(); } break;
     case 'g-login': case 'pw-login': case 'pw-signup': case 'pw-reset': case 'verify-resend': case 'verify-check': case 'retry': authAction(a); break;
     case 'reload': location.reload(); break;
     case 'trial': S.trial = true; S.gate = null; loadData(); break;
