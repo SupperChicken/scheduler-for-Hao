@@ -4,6 +4,17 @@ Bản quyền © 2026 ThienNV · thiennv@vnpt-technology.vn · 0888.99.33.00
 
 Mã phiên bản hiện ở cuối trang (Cài đặt → Nhập / xuất → Nơi lưu dữ liệu) và trong `config/app` trên Firebase. Mỗi lần thay `index.html`, ghi thêm một mục ở đầu file này: ngày, ai cập nhật, thay đổi gì. Gặp lỗi sau khi cập nhật: lấy lại `index.html` bản trước trong lịch sử GitHub (bấm file → History → chọn bản cũ → … → View file → Raw → lưu lại, rồi tải lên).
 
+## 2026-10-10 (4) · Điện thoại dễ xem hơn
+
+- Điện thoại mặc định xem **dạng thẻ chữ to**: chọn ngày, xem theo người hoặc theo chuyến, thẻ "Lịch của tôi" 7 ngày. Nút "Cả tuần (bảng)" / "📱 Dạng thẻ" để đổi.
+- Thanh trên cùng gọn lại và không dính trên đầu khi cuộn trên điện thoại.
+- Chỉ cần thay `index.html`.
+
+## 2026-10-10 (3) · Phóng to / thu nhỏ bảng trên điện thoại
+
+- Chụm 2 ngón tay trên bảng để thu nhỏ (thấy đủ 7 ngày) hoặc phóng to; nút − / % / + / ⤢ (vừa màn hình) ở góc dưới bên trái; Ctrl + lăn chuột trên máy tính. Máy nhớ cỡ đã chọn.
+- Chỉ cần thay `index.html` (không phải dán lại luật).
+
 ## 2026-10-10 (2) · Lãnh đạo xem Năng lực, Nhật ký; ghi chú nhân viên lưu riêng
 
 - Lãnh đạo xem được tab **Năng lực** (chỉ xem) và **Nhật ký thay đổi** (cuối tab Thống kê).
