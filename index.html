@@ -5,6 +5,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="robots" content="noindex,nofollow">
+<meta http-equiv="Content-Security-Policy" content="object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta name="referrer" content="strict-origin-when-cross-origin">
 <link rel="preconnect" href="https://firestore.googleapis.com" crossorigin>
 <link rel="preconnect" href="https://identitytoolkit.googleapis.com" crossorigin>
 <link rel="preconnect" href="https://securetoken.googleapis.com" crossorigin>
@@ -1648,6 +1650,7 @@ const XW = (() => {
 /* Phân Ca Sân Bay · Bản quyền © 2026 ThienNV · thiennv@vnpt-technology.vn · 0888.99.33.00 */
 const COPYRIGHT = '© 2026 ThienNV · thiennv@vnpt-technology.vn · 0888.99.33.00';
 const C = Core, DAYS = C.DAYS;
+const APP_VERSION = '20261009164224';
 const STANDALONE = !(window.claude && typeof window.claude.use === 'function');
 const $ = s => document.querySelector(s);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1791,7 +1794,7 @@ const Store = {
         if (kind === 'cfg') this.lsSet('config', data);
         else { this.lsSet('week:' + start, data); const ws = new Set(this.lsGet('weeks') || []); ws.add(start); this.lsSet('weeks', [...ws]); }
       }
-      this.lastJSON[k] = json; this.error = null;
+      this.lastJSON[k] = json; this.error = null; this.retries = 0;
     } catch (e) {
       this.pending[k] = true;
       const code = e && e.code;
@@ -1800,6 +1803,10 @@ const Store = {
       if (code === 'quota_exceeded' || code === 'resource-exhausted') this.error = 'Đã hết hạn mức lưu miễn phí hôm nay. Thử lại sau.';
       if (code === 'unavailable') this.error = 'Mất kết nối, sẽ thử lưu lại…';
       if (code === 'unavailable' || code === 'deadline-exceeded') this.timers[k] = setTimeout(() => this.flush(kind, start), 5000);
+      else if (!['permission-denied', 'not_granted', 'quota_exceeded', 'resource-exhausted', 'invalid-argument', 'failed-precondition'].includes(code)) {
+        this.retries = (this.retries || 0) + 1;
+        if (this.retries <= 6) this.timers[k] = setTimeout(() => this.flush(kind, start), Math.min(60000, 4000 * this.retries));
+      }
     }
     this.writing[k] = false; setSave();
     // áp dụng thay đổi từ người khác nhận được trong lúc đang lưu
@@ -2018,7 +2025,12 @@ async function resolveRole() {
   const ref = FBX.fs.doc('access/members');
   let s;
   try { s = await ref.get(); }
-  catch (e) { if (e && e.code === 'permission-denied') return null; throw e; }
+  catch (e) {
+    if (!(e && e.code === 'permission-denied')) throw e;
+    // không đọc được danh sách: thử đọc lịch — đọc được nghĩa là người xem
+    try { await FBX.fs.doc('config/main').get(); FBX.members = null; return 'viewer'; }
+    catch (e2) { if (e2 && e2.code === 'permission-denied') return null; throw e2; }
+  }
   const m = s.exists ? s.data() : {};
   const editors = (m.editors || []).map(lc), viewers = (m.viewers || []).map(lc);
   FBX.members = { editors, viewers };
@@ -2090,6 +2102,7 @@ function recompute() {
 function snapshot() { return JSON.stringify(S.week); }
 function mutateWeek(fn, opts = {}) {
   if (!S.week || S.ro) return;
+  if (S.staleApp) { staleToast(); return; }
   if (S.week.locked && !opts.force) { toast('Tuần này đã chốt nên không sửa được. Bấm "Mở khoá" ở đầu trang nếu cần sửa.'); return; }
   S.undo.push(snapshot()); if (S.undo.length > 40) S.undo.shift(); S.redo = [];
   fn(S.week);
@@ -2098,6 +2111,7 @@ function mutateWeek(fn, opts = {}) {
 }
 function mutateCfg(fn, opts = {}) {
   if (S.ro) return;
+  if (S.staleApp) { staleToast(); return false; }
   if (S.cfgLive) { toast('Đang mở tuần đã chốt (dùng danh sách lúc chốt). Hãy mở một tuần chưa chốt để sửa cài đặt.'); render(); return false; }
   fn(S.cfg); recompute(); Store.save('cfg');
   if (!opts.noRender) render();
@@ -2133,7 +2147,7 @@ async function loadData() {
   const todayMon = C.mondayOf(C.isoDate(new Date()));
   if (S.weeks.includes(todayMon)) start = todayMon; else if (S.weeks.length) start = S.weeks[S.weeks.length - 1];
   if (start) await openWeek(start, true);
-  S.ready = true; recompute(); render(); setSave(); Store.watch();
+  S.ready = true; recompute(); render(); setSave(); Store.watch(); watchVersion();
   if (upg.length && !S.ro && S.cfg.staff.length) {
     if (!S.cfgLive) Store.save('cfg');
     modal('Đã cập nhật cách tính ca', '<p style="margin-top:0">Trang vừa áp dụng quy tắc mới:</p><ul>' + upg.map(x => '<li>' + esc(x) + '</li>').join('') + '</ul><p class="help">Lịch đã xếp trước đây có thể hiện cảnh báo trùng giờ. Bấm <b>Tự động chia → Chỉ lấp chỗ trống</b> để máy tự gỡ chỗ trùng và xếp lại. Sửa giờ ở Cài đặt → Slot chuyến bay (cột Lên ca, Xuống ca, Làm chung).</p>', [{ label: 'Đã hiểu', cls: 'pri' }]);
@@ -2147,6 +2161,16 @@ function migrateCfg(cfg) {
   cfg.groups = cfg.groups && cfg.groups.length ? cfg.groups : C.clone(C.GROUPS);
   cfg.staff = cfg.staff || [];
   for (const s of cfg.slots) { s.days = s.days || [1, 1, 1, 1, 1, 1, 1]; s.dayLabels = s.dayLabels || {}; s.demand = s.demand || {}; }
+  // an toàn: mã chuyến / mã nhân viên chỉ gồm chữ, số và - _ . + / (chặn mã độc lọt vào qua file nhập)
+  const safe = v => String(v == null ? '' : v).replace(/[^\p{L}\p{N}\-_.+/ ]/gu, '').slice(0, 40);
+  for (const s of cfg.slots) {
+    s.id = safe(s.id) || ('SLOT' + Math.random().toString(36).slice(2, 6));
+    if (s.covers) s.covers = s.covers.map(safe).filter(Boolean);
+    if (s.startIf) s.startIf = s.startIf.map(x => ({ slot: safe(x.slot), start: String(x.start || '').replace(/\D/g, '').slice(0, 4) }));
+    for (const k of ['start', 'end', 'time']) if (s[k] != null) s[k] = String(s[k]).replace(/\D/g, '').slice(0, 4);
+  }
+  for (const sf of cfg.staff) sf.id = safe(sf.id) || C.uid();
+  for (const g of cfg.groups) g.id = typeof g.id === 'number' ? g.id : (parseInt(g.id, 10) || g.id);
 }
 async function openWeek(start, silent) {
   let w = null;
@@ -2162,6 +2186,36 @@ async function openWeek(start, silent) {
 
 /* ================= RENDER ================= */
 function render() {
+  try { renderInner(); }
+  catch (e) {
+    console.error(e); reportErr(e);
+    const m = $('#main'); if (m) m.innerHTML = '<div class="empty"><h2>Trang gặp lỗi khi hiển thị</h2><p>Dữ liệu đã lưu vẫn an toàn trên máy chủ. Bấm tải lại trang; nếu lỗi lặp lại, chụp màn hình gửi người quản lý.</p><p class="muted" style="font-size:12px">' + esc(String(e && e.message || e)).slice(0, 200) + '</p><button class="btn pri" data-act="reload">Tải lại trang</button></div>';
+  }
+}
+let errCount = 0;
+function reportErr(e) {
+  if (++errCount > 20) return;
+  try { const box = $('#toastHost'); if (box) box.innerHTML = '<div class="toast" role="status">Có lỗi nhỏ xảy ra (' + esc(String(e && e.message || e)).slice(0, 80) + '). Dữ liệu đã lưu vẫn an toàn; nếu trang hoạt động lạ, hãy tải lại.</div>'; } catch (x) {}
+}
+window.addEventListener('error', ev => { if (ev && ev.message && !/ResizeObserver|Script error/.test(ev.message)) reportErr(ev.error || ev.message); });
+window.addEventListener('unhandledrejection', ev => { const r = ev && ev.reason; if (r && r.code === 'declined') return; reportErr(r); });
+// chặn đóng trang khi còn thay đổi chưa lưu xong
+window.addEventListener('beforeunload', ev => { if (Object.keys(Store.pending || {}).length || Object.values(Store.writing || {}).some(Boolean)) { ev.preventDefault(); ev.returnValue = 'Đang lưu, chờ vài giây rồi hãy đóng trang.'; return ev.returnValue; } });
+function staleToast() { toast('Trang đã có bản mới. Bấm "Tải lại" ở dải vàng trên cùng trước khi sửa, để không ghi đè dữ liệu bằng bản cũ.'); }
+function watchVersion() {
+  if (Store.mode !== 'fb' || !FBX.fs || APP_VERSION.startsWith('__')) return;
+  const ref = FBX.fs.doc('config/app');
+  ref.onSnapshot(s => {
+    const v = s.exists ? String(s.data().v || '') : '';
+    if (v && v > APP_VERSION) {
+      if (!S.staleApp) { S.staleApp = true; render(); }
+    } else if (!S.ro && (!v || v < APP_VERSION)) {
+      ref.set({ v: APP_VERSION, at: new Date().toISOString(), by: FBX.user ? FBX.user.email : '' }).catch(() => {});
+    }
+  }, () => {});
+}
+function staleBar() { return S.staleApp ? '<div class="lockbar" style="background:var(--warnSoft)">⚠ Trang đã có <b>bản mới</b>. Bấm tải lại để dùng bản mới' + (S.ro ? '' : ' (bản cũ tạm khoá sửa để không ghi đè dữ liệu)') + '. <button class="btn sm pri" data-act="reload">Tải lại</button></div>' : ''; }
+function renderInner() {
   if (S.gate) { renderGate(); return; }
   renderTop();
   const m = $('#main');
@@ -2169,7 +2223,7 @@ function render() {
   if (!S.week) { m.innerHTML = emptyView(); return; }
   const v = { roster: viewRoster, leave: viewLeave, cov: viewCov, plan: viewPlan, stats: viewStats, ts: viewTs, cfg: viewCfg }[S.tab];
   const sx = document.querySelector('.scroll'); const keep = sx ? [sx.scrollLeft, sx.scrollTop] : null;
-  m.innerHTML = lockBanner() + v();
+  m.innerHTML = staleBar() + lockBanner() + v();
   const nx = document.querySelector('.scroll'); if (nx && keep && S._keepScroll !== false) { nx.scrollLeft = keep[0]; nx.scrollTop = keep[1]; }
   S._keepScroll = true;
   renderDrawer();
@@ -2798,6 +2852,8 @@ async function historyModel() {
 async function runAuto(mode, autoOff, learn) {
   const cfg = Object.assign({}, S.cfg, { rules: Object.assign({}, S.cfg.rules, { autoOff }) });
   const L = learn === false ? null : await historyModel().catch(() => null);
+  // sao lưu trước khi xếp lại toàn bộ (khôi phục được ở Cài đặt → Nhập / xuất → Bản sao lưu tự động)
+  if (mode === 'rebuild' && typeof Backup !== 'undefined' && S.week && Object.values(S.week.cells || {}).some(c => Object.values(c).some(x => x && (x.items || []).length))) { try { await Backup.create('Trước khi xếp lại toàn bộ'); } catch (e) {} }
   const t0 = performance.now();
   let res;
   try { res = C.autoAssign(cfg, S.week, { mode, seed: Math.floor(Math.random() * 1e6) + 1, learn: L }); }
@@ -2927,7 +2983,8 @@ async function importJson() {
 Store.flushNow = function (kind) { clearTimeout(this.timers.cfg); return this.flush(kind); };
 function deleteWeek() {
   const start = S.week.start;
-  modal('Xoá tuần ' + weekName(start) + '?', '<p style="margin:0">Mọi phân công, trạng thái và chấm công của tuần này sẽ bị xoá vĩnh viễn.</p>', [{ label: 'Huỷ' }, { label: 'Xoá tuần', cls: 'danger', fn: async () => {
+  modal('Xoá tuần ' + weekName(start) + '?', '<p style="margin:0">Mọi phân công, trạng thái và chấm công của tuần này sẽ bị xoá. Trang tự lưu một bản sao lưu trước khi xoá (khôi phục ở Cài đặt → Nhập / xuất dữ liệu → Bản sao lưu tự động).</p>', [{ label: 'Huỷ' }, { label: 'Xoá tuần', cls: 'danger', fn: async () => {
+    if (typeof Backup !== 'undefined') { try { await Backup.create('Trước khi xoá tuần ' + weekName(start)); } catch (e) {} }
     await Store.deleteWeek(start); S.weeks = S.weeks.filter(x => x !== start); S.week = null;
     if (S.weeks.length) await openWeek(S.weeks[S.weeks.length - 1]); else render();
     toast('Đã xoá tuần');
@@ -3080,7 +3137,7 @@ document.addEventListener('change', e => {
   if (t.dataset.slf) {
     const [i, f] = t.dataset.slf.split('|'); const s = S.cfg.slots[+i]; let v = t.value.trim();
     if (f === 'id') {
-      v = v.toUpperCase(); if (!v || S.cfg.slots.some((x, j) => j !== +i && x.id === v)) { toast('Mã slot trống hoặc bị trùng'); render(); return; }
+      v = v.toUpperCase().replace(/[^\p{L}\p{N}\-_.+/]/gu, '').slice(0, 20); if (!v || S.cfg.slots.some((x, j) => j !== +i && x.id === v)) { toast('Mã slot trống, bị trùng hoặc có ký tự lạ (chỉ dùng chữ, số, - _ . + /)'); render(); return; }
       const old = s.id;
       mutateCfg(c => { c.slots[+i].id = v; });
       mutateWeek(w => { if (w.plan[old]) { w.plan[v] = w.plan[old]; delete w.plan[old]; } for (const sid in w.cells) for (const d in w.cells[sid]) (w.cells[sid][d].items || []).forEach(it => { if (it.slot === old) it.slot = v; }); });

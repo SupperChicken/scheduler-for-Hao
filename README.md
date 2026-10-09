@@ -162,6 +162,27 @@ Khi tuần đã chạy xong và chấm công xong, bấm **🔒 Chốt tuần** 
 - **Thêm hoặc bớt người:** sửa danh sách ở *Quyền truy cập*. Người bị xoá mất quyền ngay lập tức.
 - **Sao lưu:** thỉnh thoảng bấm *Tải bản sao lưu* để giữ một bản trên máy, phòng khi xoá nhầm.
 
+## Bảo mật và an toàn dữ liệu
+
+Trang đã có sẵn:
+
+- Chỉ email trong danh sách mới đọc được; tài khoản email phải xác minh. Người xem không sửa được và **không thấy email của người khác**.
+- Khoá AI, mã bot Telegram, link gửi email, danh bạ SĐT chỉ người làm lịch đọc được.
+- Mọi chữ nhập vào (tên, ghi chú, dữ liệu từ ảnh / Excel) được lọc trước khi hiển thị, chặn chèn mã độc.
+- Tự sao lưu trước mỗi lần nhập dữ liệu, trước khi **Xếp lại toàn bộ** và trước khi **xoá tuần** (giữ 30 bản).
+- Mất mạng: thay đổi được giữ lại và tự lưu khi có mạng; đóng trang khi đang lưu sẽ được hỏi lại.
+- Có người mở **bản trang cũ** (trình duyệt chưa tải bản mới): trang hiện dải vàng và khoá sửa, để bản cũ không ghi đè dữ liệu.
+
+Người quản lý nên làm thêm (một lần, khoảng 10 phút):
+
+1. **Dán lại `firestore.rules`** mới nhất vào Firebase → Publish (bắt buộc với bản này).
+2. Firebase → Authentication → Settings → **Authorized domains**: chỉ giữ `localhost`, `<tên>.github.io` và `<dự án>.firebaseapp.com`.
+3. Firebase → Authentication → Settings → **User actions**: bật *Email enumeration protection*.
+4. Google Cloud Console → APIs & Services → Credentials → khoá *Browser key*: **Application restrictions → Websites**, thêm `https://<tên>.github.io/*` và `https://<dự án>.firebaseapp.com/*`.
+5. Mỗi tháng bấm **Tải bản sao lưu** (Cài đặt → Nhập / xuất dữ liệu) và cất file JSON ở nơi an toàn, **không** đưa lên GitHub.
+6. Người nghỉ việc: xoá email khỏi *Quyền truy cập* ngay; máy dùng chung luôn bấm **Đăng xuất**.
+7. Đổi khoá Gemini nếu từng gửi khoá qua tin nhắn / chat.
+
 ## Tốc độ và bộ nhớ đệm
 
 - Trang lưu một bản dữ liệu trong trình duyệt (bộ nhớ đệm của Firebase). Người xem mở lại trang gần như tức thì, bản mới nhất từ máy chủ tự cập nhật sau đó vài giây. Người làm lịch luôn đọc bản mới nhất từ máy chủ trước khi sửa.
