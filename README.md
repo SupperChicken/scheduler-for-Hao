@@ -24,6 +24,7 @@ Công cụ chia lịch và chấm công cho nhân viên phục vụ chuyến bay
 | `index.html` | Toàn bộ ứng dụng | Có |
 | `firebase-config.js` | Cấu hình kết nối Firebase (bạn sửa ở bước 3) | Có |
 | `.nojekyll` | Để GitHub Pages phục vụ file nguyên trạng | Có |
+| `lib/` (thư mục) | Bản sao thư viện (Excel, Firebase) để trang không phụ thuộc máy chủ ngoài. Tải bằng nút trong trang, xem mục *Cập nhật bản mới* | Nên có |
 | `firestore.rules` | Luật bảo mật, dán vào Firebase ở bước 4 | Không bắt buộc |
 | `README.md` | Hướng dẫn này | Không bắt buộc |
 
@@ -95,6 +96,55 @@ Trong Firebase, vào **Authentication → Settings → Authorized domains**, b�
 4. **Tự động chia**. Nếu sửa OFF/NP sau khi đã chia, bấm lại **Tự động chia → Chỉ lấp chỗ trống**: người mới nghỉ sẽ được gỡ khỏi chuyến (trừ ô đã khoá) và xếp người thay.
 5. Kiểm tra **bảng đếm quân số cuối tab Lịch tuần** (giống hàm COUNT cuối bảng Excel) hoặc tab **Quân số**: ô đỏ là chuyến còn thiếu người.
 
+## Nhập dữ liệu từ ảnh, văn bản, CSV
+
+Nút **⇪ Nhập dữ liệu** (thanh trên cùng, chỉ người làm lịch thấy) nhận 4 loại dữ liệu: Phân ca, OFF/NP, Chấm công OVER/BÙ, Lịch bay. Mỗi loại lấy được từ nhiều nguồn:
+
+| Nguồn | Cách đọc | Cần gì |
+|---|---|---|
+| Ảnh chụp giấy viết tay, bảng in, ảnh màn hình, PDF | AI Google Gemini đọc | Khoá API Gemini miễn phí (xem dưới) |
+| Dán bảng từ Excel / Google Sheets | Máy tự đọc theo cột | Không cần gì |
+| Văn bản tự do (tin nhắn Zalo, email) | AI đọc | Khoá Gemini |
+| File CSV / TSV / TXT | Máy tự đọc theo cột | Không cần gì |
+| File Excel mẫu cũ | Trình nhập Excel | Không cần gì |
+
+**Quy trình an toàn:**
+1. Đọc xong, trang hiện **bảng kiểm tra**: ảnh gốc để đối chiếu, mỗi dòng ghi rõ nội dung đọc được và nội dung hiện có trong lịch. Dòng chưa chắc được tô vàng (tên chưa khớp, chữ không đọc được, AI không chắc).
+2. Bạn sửa ngay trong bảng: chọn lại nhân viên, ngày, trạng thái, chuyến, hoặc bỏ chọn dòng không muốn nhập.
+3. Bấm **Kiểm tra xong, nhập vào lịch…**. Trang hỏi lại *"Dữ liệu đã chuẩn chưa?"*.
+4. Khi bạn xác nhận, trang **tự tạo bản sao lưu** của tuần rồi mới ghi. Có thể chọn tải thêm một file sao lưu về máy.
+5. Nhập xong vẫn sửa tay như thường. Muốn bỏ thì bấm **Hoàn tác lần nhập này**, hoặc vào **Cài đặt & dữ liệu → Nhập / xuất dữ liệu → Bản sao lưu tự động** (giữ 30 bản gần nhất).
+
+**Cách nhanh nhất trên điện thoại:** bấm **📷 Nhập từ ảnh** trên thanh trên cùng, chụp hoặc chọn ảnh có sẵn (kể cả ảnh nhận qua Zalo). AI tự nhận biết đó là phân ca, OFF/NP, chấm công hay lịch bay, đọc xong là hiện ngay bảng kiểm tra. Người dùng không cần cài đặt gì.
+
+**Bật AI đọc ảnh — người quản lý làm MỘT lần cho cả nhóm:**
+1. Mở https://aistudio.google.com/apikey, đăng nhập Google, bấm **Create API key**, rồi chép khoá. Khoá mới có dạng `AQ.Ab…` (Google đã bỏ dạng `AIza…` cũ cho Gemini).
+2. Trong trang lịch, vào **Cài đặt & dữ liệu → Nhập / xuất dữ liệu → Đọc ảnh bằng AI**, dán khoá, bấm **Bật cho cả nhóm**.
+3. Xong. Mọi người làm lịch trên mọi máy dùng được ngay.
+   - Khoá được lưu trên Firebase, chỉ người làm lịch đọc được; người xem và người ngoài không thấy.
+   - Ở gói miễn phí, Google có thể dùng nội dung gửi lên để cải thiện sản phẩm. Nếu ngại, hãy dùng cách dán văn bản.
+
+**Mẹo chụp ảnh:** chụp thẳng, đủ sáng, cả bảng nằm trong khung. Bảng dài thì chụp nhiều ảnh, chọn cùng lúc. Ảnh nghiêng thì bấm **⟳ Xoay**.
+
+**Nếu bạn đã cài từ bản trước:** dán lại file `firestore.rules` mới vào Firebase rồi bấm **Publish**. Bản mới có thêm quyền cho mục bản sao lưu và khoá AI dùng chung; nếu chưa dán, nút **Bật cho cả nhóm** sẽ báo không có quyền.
+
+## Chốt tuần
+
+Khi tuần đã chạy xong và chấm công xong, bấm **🔒 Chốt tuần** ở đầu tab Lịch tuần.
+
+- Tuần đã chốt **không sửa được** (kể cả nhập dữ liệu, tự động chia). Ai cũng thấy dải báo "Tuần đã chốt" ở đầu trang.
+- Trang lưu kèm **danh sách nhân viên, chuyến, mã ca lúc chốt**. Sau này có xoá người nghỉ việc hay đổi giờ chuyến thì tuần cũ vẫn hiện đúng như lúc đó.
+- Cần sửa lại: bấm **Mở khoá để sửa** trên dải báo (chỉ người làm lịch).
+
+**Người nghỉ việc / chuyến bỏ:** khi bấm xoá, trang gợi ý **Chuyển sang tạm nghỉ** (với người) hoặc **Tắt slot** (với chuyến) thay vì xoá hẳn, để lịch các tuần cũ không mất tên.
+
+## Cập nhật bản mới (khi nhận index.html mới)
+
+1. Trên GitHub, mở kho → bấm vào `index.html` → biểu tượng bút ✏️ hoặc *Add file → Upload files*, kéo `index.html` mới vào, bấm **Commit changes**.
+2. **Dán lại `firestore.rules`** vào Firebase (Firestore Database → Rules → dán → **Publish**). Bản này lưu mỗi tuần thành 7 phần nhỏ theo ngày; nếu chưa dán luật mới, khi lưu sẽ báo *"Không có quyền ghi… hãy dán lại firestore.rules"*.
+3. Lần đầu dùng bản này, người làm lịch mở trang một lần: tuần đang mở tự chuyển sang dạng mới khi lưu, không cần làm gì.
+4. **Thư viện tự lưu (làm một lần):** vào **Cài đặt & dữ liệu → Nhập / xuất dữ liệu**, mục *Thư viện của trang*, bấm **Tải bộ thư viện (lib.zip)**, giải nén ra được thư mục `lib`, rồi tải cả thư mục lên GitHub (*Add file → Upload files*, kéo thư mục `lib` vào). Từ đó trang dùng bản trong kho; nếu thiếu thì tự lấy từ mạng như cũ.
+
 ## Dùng hằng ngày
 
 - **Nhân viên:** mở link, đăng nhập bằng Google, hoặc bấm *Tạo tài khoản* bằng email rồi xác minh qua thư. Họ chỉ xem được Lịch tuần, Quân số, Thống kê. Gõ tên vào ô tìm kiếm để xem lịch của mình. Lịch tự cập nhật khi người làm lịch sửa.
@@ -106,7 +156,12 @@ Trong Firebase, vào **Authentication → Settings → Authorized domains**, b�
 
 Gói Spark của Firestore cho khoảng 50.000 lượt đọc, 20.000 lượt ghi mỗi ngày và 1 GB lưu trữ. Với khoảng 80 người xem vài lần mỗi ngày, mức dùng chỉ khoảng vài nghìn lượt, còn rất xa giới hạn. Nếu một ngày bị vượt, trang chỉ tạm không lưu được đến hôm sau và không mất tiền, vì gói Spark không có thẻ thanh toán.
 
-Mỗi tuần lịch chiếm khoảng 150 KB, nên 1 GB đủ cho hàng nghìn tuần.
+Mỗi tuần lịch chiếm khoảng 150 KB, nên 1 GB đủ cho hàng nghìn tuần (khoảng 20 năm vẫn dưới 20% dung lượng), không cần xoá bớt.
+
+Để tiết kiệm lượt đọc:
+- Mỗi lần sửa một ô, máy chỉ gửi phần ngày bị sửa (khoảng 4 KB thay vì cả tuần 150 KB).
+- Trang để ở tab nền quá 1 phút sẽ tạm ngừng nhận cập nhật, mở lại thì tự đồng bộ ngay.
+- Bản sao lưu tự động chỉ giữ 30 bản mới nhất, bản cũ tự xoá.
 
 ## Gặp lỗi?
 
