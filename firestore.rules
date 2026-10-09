@@ -1,0 +1,110 @@
+rules_version = '2';
+// Phân Ca Sân Bay · Bản quyền © 2026 ThienNV · thiennv@vnpt-technology.vn · 0888.99.33.00
+// Luật bảo mật. Dán toàn bộ file này vào Firebase → Firestore Database → Rules → Publish.
+// Chủ dự án (OWNERS) là người làm lịch ở MỌI đơn vị. Đổi email ở dòng OWNERS nếu cần.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function OWNERS() { return ['phancasanbay.dn@gmail.com']; }
+    function signedIn() { return request.auth != null && request.auth.token.email_verified == true; }
+    function myEmail() { return request.auth.token.email.lower(); }
+    function isOwner() { return signedIn() && myEmail() in OWNERS(); }
+    function shortStr(v, n) { return v is string && v.size() <= n; }
+    function validSub() {
+      let d = request.resource.data;
+      return d.keys().hasOnly(['uid', 'account', 'staffId', 'on', 'events', 'email', 'tg', 'updatedAt'])
+        && shortStr(d.staffId, 40) && shortStr(d.account, 120) && d.uid == request.auth.uid
+        && (!('email' in d) || (d.email is map && d.email.keys().hasOnly(['on', 'addr']) && shortStr(d.email.addr, 120)))
+        && (!('events' in d) || (d.events is map && d.events.keys().hasOnly(['week', 'changes'])))
+        && (!('tg' in d) || (d.tg is map && d.tg.keys().hasOnly(['code', 'on', 'chatId', 'user', 'at'])
+             && (!('chatId' in d.tg) || (resource != null && ('tg' in resource.data) && ('chatId' in resource.data.tg) && resource.data.tg.chatId == d.tg.chatId))));
+    }
+
+    // ===== Đơn vị mặc định (firebase-config.js không có "unit") =====
+    function hasMembersRoot() { return exists(/databases/$(database)/documents/access/members); }
+    function membersRoot() { return get(/databases/$(database)/documents/access/members).data; }
+    function isEditorRoot() { return isOwner() || (signedIn() && hasMembersRoot() && myEmail() in membersRoot().editors); }
+    function isLeaderRoot() { return signedIn() && exists(/databases/$(database)/documents/access/leaders) && myEmail() in get(/databases/$(database)/documents/access/leaders).data.list; }
+    function isViewerRoot() { return isEditorRoot() || (signedIn() && hasMembersRoot() && myEmail() in membersRoot().viewers); }
+
+    // ----- danh sách người được xem / được sửa (chỉ người làm lịch xem được email) -----
+    match /access/members {
+      allow read: if isEditorRoot();
+      allow write: if isEditorRoot() && request.resource.data.editors is list && request.resource.data.viewers is list;
+    }
+    // danh sách lãnh đạo (trưởng / phó): người trong danh sách tự đọc được để biết vai trò của mình
+    match /access/leaders {
+      allow read: if isEditorRoot() || (signedIn() && myEmail() in resource.data.list);
+      allow write: if isEditorRoot() && request.resource.data.list is list;
+    }
+    match /config/{docId} { allow read: if isViewerRoot(); allow write: if isEditorRoot(); }
+    match /weeks/{weekId} { allow read: if isViewerRoot(); allow write: if isEditorRoot(); }
+    match /weeks/{weekId}/days/{dayId} { allow read: if isViewerRoot(); allow write: if isEditorRoot(); }
+    // OVER / BÙ (chấm công): chỉ người làm lịch và lãnh đạo
+    match /weeks/{weekId}/ot/{dayId} { allow read: if isEditorRoot() || isLeaderRoot(); allow write: if isEditorRoot(); }
+    // nhật ký thay đổi: chỉ thêm, không sửa / xoá được
+    match /weeks/{weekId}/log/{logId} {
+      allow read: if isEditorRoot() || isLeaderRoot();
+      allow create: if isEditorRoot() && request.resource.data.by == myEmail() && request.resource.data.keys().hasOnly(['at', 'by', 'full', 'n', 'ch']) && request.resource.data.ch is list && request.resource.data.ch.size() <= 60;
+      allow update, delete: if false;
+    }
+    match /backups/{backupId} { allow read, write: if isEditorRoot(); }
+    match /secrets/{docId} { allow read, write: if isEditorRoot(); }
+    // lãnh đạo được xem (không sửa) bảng năng lực và ghi chú nhân viên
+    match /secrets/skills { allow read: if isLeaderRoot(); }
+    match /secrets/staffnotes { allow read: if isLeaderRoot(); }
+    match /subs/{uid} {
+      allow read: if isEditorRoot() || (isViewerRoot() && request.auth.uid == uid);
+      allow delete: if isEditorRoot() || (isViewerRoot() && request.auth.uid == uid);
+      allow create, update: if isEditorRoot() || (isViewerRoot() && request.auth.uid == uid && validSub());
+    }
+    match /sendlog/{weekId} { allow read, write: if isEditorRoot(); }
+    match /presence/{uid} { allow read: if isEditorRoot(); allow write: if isEditorRoot() && request.auth.uid == uid; }
+
+    // ===== Các đơn vị khác: units/{unit}/... (firebase-config.js có unit: 'ma-don-vi') =====
+    match /units/{unit} {
+      function hasMembersUnit() { return exists(/databases/$(database)/documents/units/$(unit)/access/members); }
+      function membersUnit() { return get(/databases/$(database)/documents/units/$(unit)/access/members).data; }
+      function isEditorUnit() { return isOwner() || (signedIn() && hasMembersUnit() && myEmail() in membersUnit().editors); }
+      function isLeaderUnit() { return signedIn() && exists(/databases/$(database)/documents/units/$(unit)/access/leaders) && myEmail() in get(/databases/$(database)/documents/units/$(unit)/access/leaders).data.list; }
+      function isViewerUnit() { return isEditorUnit() || (signedIn() && hasMembersUnit() && myEmail() in membersUnit().viewers); }
+
+      // ----- danh sách người được xem / được sửa (chỉ người làm lịch xem được email) -----
+      match /access/members {
+        allow read: if isEditorUnit();
+        allow write: if isEditorUnit() && request.resource.data.editors is list && request.resource.data.viewers is list;
+      }
+      // danh sách lãnh đạo (trưởng / phó): người trong danh sách tự đọc được để biết vai trò của mình
+      match /access/leaders {
+        allow read: if isEditorUnit() || (signedIn() && myEmail() in resource.data.list);
+        allow write: if isEditorUnit() && request.resource.data.list is list;
+      }
+      match /config/{docId} { allow read: if isViewerUnit(); allow write: if isEditorUnit(); }
+      match /weeks/{weekId} { allow read: if isViewerUnit(); allow write: if isEditorUnit(); }
+      match /weeks/{weekId}/days/{dayId} { allow read: if isViewerUnit(); allow write: if isEditorUnit(); }
+      // OVER / BÙ (chấm công): chỉ người làm lịch và lãnh đạo
+      match /weeks/{weekId}/ot/{dayId} { allow read: if isEditorUnit() || isLeaderUnit(); allow write: if isEditorUnit(); }
+      // nhật ký thay đổi: chỉ thêm, không sửa / xoá được
+      match /weeks/{weekId}/log/{logId} {
+        allow read: if isEditorUnit() || isLeaderUnit();
+        allow create: if isEditorUnit() && request.resource.data.by == myEmail() && request.resource.data.keys().hasOnly(['at', 'by', 'full', 'n', 'ch']) && request.resource.data.ch is list && request.resource.data.ch.size() <= 60;
+        allow update, delete: if false;
+      }
+      match /backups/{backupId} { allow read, write: if isEditorUnit(); }
+      match /secrets/{docId} { allow read, write: if isEditorUnit(); }
+      // lãnh đạo được xem (không sửa) bảng năng lực và ghi chú nhân viên
+      match /secrets/skills { allow read: if isLeaderUnit(); }
+      match /secrets/staffnotes { allow read: if isLeaderUnit(); }
+      match /subs/{uid} {
+        allow read: if isEditorUnit() || (isViewerUnit() && request.auth.uid == uid);
+        allow delete: if isEditorUnit() || (isViewerUnit() && request.auth.uid == uid);
+        allow create, update: if isEditorUnit() || (isViewerUnit() && request.auth.uid == uid && validSub());
+      }
+      match /sendlog/{weekId} { allow read, write: if isEditorUnit(); }
+      match /presence/{uid} { allow read: if isEditorUnit(); allow write: if isEditorUnit() && request.auth.uid == uid; }
+
+    }
+
+    // mọi thứ khác: cấm
+    match /{document=**} { allow read, write: if false; }
+  }
+}
