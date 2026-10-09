@@ -147,7 +147,8 @@ Khi tuần đã chạy xong và chấm công xong, bấm **🔒 Chốt tuần** 
 
 ## Gửi lịch qua Email, Telegram, Zalo (miễn phí)
 
-- Người quản lý cài một lần ở **Cài đặt & dữ liệu → Gửi tin**: Email qua Google Apps Script (Gmail của bạn, khoảng 100 thư/ngày), Telegram qua bot tạo bằng @BotFather. Trang hướng dẫn từng bước.
+- **Cách đơn giản nhất:** nhập SĐT / email từng người ở **Cài đặt & dữ liệu → Gửi tin → Danh bạ** (dán cả danh sách được). Bấm **📣 Gửi lịch** → mỗi người có nút **Zalo** (mở chat, dán là gửi), **SMS**, **Email**. Nhân viên không phải đăng ký.
+- Tuỳ chọn gửi tự động: người quản lý cài một lần ở **Cài đặt & dữ liệu → Gửi tin**: Email qua Google Apps Script (Gmail của bạn, khoảng 100 thư/ngày), Telegram qua bot tạo bằng @BotFather. Trang hướng dẫn từng bước.
 - Nhân viên bấm **🔔 Nhận lịch**, chọn tên, bật Email hoặc kết nối Telegram.
 - Mỗi tuần bấm **📣 Gửi lịch** ở tab Lịch tuần: gửi cả tuần hoặc chỉ người có thay đổi. Zalo: bấm Chép rồi dán vào nhóm.
 - **Bắt buộc:** dán lại `firestore.rules` mới (có thêm mục `subs` và `sendlog`), nếu không nhân viên sẽ không lưu được đăng ký.
