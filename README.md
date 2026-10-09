@@ -145,7 +145,16 @@ Khi tuần đã chạy xong và chấm công xong, bấm **🔒 Chốt tuần** 
 3. Lần đầu dùng bản này, người làm lịch mở trang một lần: tuần đang mở tự chuyển sang dạng mới khi lưu, không cần làm gì.
 4. **Thư viện tự lưu (làm một lần):** vào **Cài đặt & dữ liệu → Nhập / xuất dữ liệu**, mục *Thư viện của trang*, bấm **Tải bộ thư viện (lib.zip)**, giải nén ra được thư mục `lib`, rồi tải cả thư mục lên GitHub (*Add file → Upload files*, kéo thư mục `lib` vào). Từ đó trang dùng bản trong kho; nếu thiếu thì tự lấy từ mạng như cũ.
 
+## Gửi lịch qua Email, Telegram, Zalo (miễn phí)
+
+- Người quản lý cài một lần ở **Cài đặt & dữ liệu → Gửi tin**: Email qua Google Apps Script (Gmail của bạn, khoảng 100 thư/ngày), Telegram qua bot tạo bằng @BotFather. Trang hướng dẫn từng bước.
+- Nhân viên bấm **🔔 Nhận lịch**, chọn tên, bật Email hoặc kết nối Telegram.
+- Mỗi tuần bấm **📣 Gửi lịch** ở tab Lịch tuần: gửi cả tuần hoặc chỉ người có thay đổi. Zalo: bấm Chép rồi dán vào nhóm.
+- **Bắt buộc:** dán lại `firestore.rules` mới (có thêm mục `subs` và `sendlog`), nếu không nhân viên sẽ không lưu được đăng ký.
+
 ## Dùng hằng ngày
+
+- **Hướng dẫn trong trang:** nút **📖 Hướng dẫn** trên thanh trên cùng (và link *Xem hướng dẫn* ở màn hình đăng nhập). Người xem thấy bản cho nhân viên; người làm lịch thấy thêm bản đầy đủ. Mỗi bản đọc trực tiếp, tải Word, hoặc in / lưu PDF.
 
 - **Nhân viên:** mở link, đăng nhập bằng Google, hoặc bấm *Tạo tài khoản* bằng email rồi xác minh qua thư. Họ chỉ xem được Lịch tuần, Quân số, Thống kê. Gõ tên vào ô tìm kiếm để xem lịch của mình. Lịch tự cập nhật khi người làm lịch sửa.
 - **Người làm lịch:** chia lịch, sửa và tạo tuần mới ngay trên trang. Mọi thứ tự lưu lên Firebase, không cần tải file hay đăng lại.
