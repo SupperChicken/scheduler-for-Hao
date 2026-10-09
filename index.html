@@ -107,6 +107,8 @@ table.rev .why{font-size:11.5px;color:var(--warn)}
 .spin{width:34px;height:34px;margin:0 auto 10px;border-radius:50%;border:3px solid var(--line);border-top-color:var(--accent);animation:spin 0.9s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 .okc{color:var(--ok);font-weight:700}
+.lockbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:9px 12px;margin-bottom:12px;border-radius:8px;background:var(--accentSoft);color:var(--ink);font-size:13px}
+.wklock td.cell{cursor:default}
 .issue.okk{background:var(--okSoft);color:var(--ok)}
 
 .ro td.cell{cursor:default}
@@ -340,11 +342,28 @@ td.c{text-align:center}
 <input type="file" id="fileJson" accept=".json" hidden>
 <input type="file" id="camQuick" accept="image/*,application/pdf" multiple hidden>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-<script src="firebase-config.js"></script>
+<!--PRELOAD-->
+<script>
+/* Nạp thư viện: ưu tiên bản lưu trong kho (thư mục lib/), không có thì tải từ mạng ngoài. */
+window.__LIBS = [
+  { name: 'xlsx.full.min.js', cdn: 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js', has: function () { return !!window.XLSX; } },
+  { name: 'firebase-app-compat.js', cdn: 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js', has: function () { return !!(window.firebase && window.firebase.initializeApp); } },
+  { name: 'firebase-auth-compat.js', cdn: 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js', has: function () { return !!(window.firebase && window.firebase.auth); } },
+  { name: 'firebase-firestore-compat.js', cdn: 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js', has: function () { return !!(window.firebase && window.firebase.firestore); } }
+];
+window.__libSrc = {};
+window.__libsReady = (async function () {
+  function load(src) { return new Promise(function (res, rej) { var s = document.createElement('script'); s.src = src; s.onload = function () { res(); }; s.onerror = function () { s.remove(); rej(new Error(src)); }; document.head.appendChild(s); }); }
+  for (var i = 0; i < window.__LIBS.length; i++) {
+    var L = window.__LIBS[i];
+    if (L.has()) { window.__libSrc[L.name] = 'có sẵn'; continue; }
+    try { await load('lib/' + L.name); window.__libSrc[L.name] = 'kho'; }
+    catch (e) { try { await load(L.cdn); window.__libSrc[L.name] = 'mạng ngoài'; } catch (e2) { window.__libSrc[L.name] = 'lỗi'; } }
+  }
+  try { await load('firebase-config.js'); } catch (e) {}
+})();
+
+</script>
 <script>
 /* Phân Ca Sân Bay · Bản quyền © 2026 ThienNV · thiennv@vnpt-technology.vn · 0888.99.33.00 */
 /* ===== CORE: mô hình dữ liệu, kiểm tra luật, chia lịch tự động, nhập/xuất ===== */
@@ -1398,7 +1417,7 @@ const XW = (() => {
     }
     return build(sheets, { title: 'Lịch phân ca ' + wname, author: opt.author || '', company: opt.company || '', comments: copyTxt });
   }
-  return { build, exportWeek };
+  return { build, exportWeek, zip };
 })();
 
 
@@ -1438,8 +1457,33 @@ function diffTop(a, b, field, depthMap) {
   for (const k of ks) diffRec((a || {})[k], (b || {})[k], [field, k], depthMap[k] || 0, out);
   return out;
 }
+// Lưu mỗi tuần thành 1 bản ghi chính (lịch bay, CN trước…) + 7 bản ghi theo ngày (phân công, chấm công).
+// Sửa một ô chỉ gửi lại bản ghi của ngày đó → giảm mạnh dữ liệu truyền đi so với gửi cả tuần.
+const DAY_IDS = ['0', '1', '2', '3', '4', '5', '6'];
+function compactCell(c) {
+  if (!c) return undefined; const o = {};
+  if (c.status) o.status = c.status; if (c.note) o.note = c.note; if (c.autoOff) o.autoOff = true;
+  if (c.items && c.items.length) o.items = c.items.map(i => { const x = { slot: i.slot }; if (i.role) x.role = i.role; if (i.tag) x.tag = i.tag; if (i.lock) x.lock = true; if (i.auto) x.auto = true; return x; });
+  return Object.keys(o).length ? o : undefined;
+}
+function expandCell(c) { const o = { status: c.status || '', note: c.note || '', items: (c.items || []).map(i => Object.assign({ role: '' }, i)) }; if (c.autoOff) o.autoOff = true; return o; }
+function splitWeek(w) {
+  const meta = {}; for (const k in w) if (k !== 'cells' && k !== 'over') meta[k] = w[k];
+  const days = DAY_IDS.map(() => ({ cells: {}, over: {} }));
+  for (const sid in (w.cells || {})) for (const d in w.cells[sid]) { const cc = compactCell(w.cells[sid][d]); if (cc && days[+d]) days[+d].cells[sid] = cc; }
+  for (const sid in (w.over || {})) for (const d in w.over[sid]) { const o = w.over[sid][d]; if (o && days[+d] && Object.keys(o).some(k => o[k] !== '' && o[k] != null)) days[+d].over[sid] = o; }
+  return { meta: JSON.parse(JSON.stringify(meta)), days: JSON.parse(JSON.stringify(days)) };
+}
+function joinWeek(meta, days) {
+  const w = JSON.parse(JSON.stringify(meta || {})); w.cells = {}; w.over = {};
+  (days || []).forEach((dd, d) => { if (!dd) return;
+    for (const sid in (dd.cells || {})) (w.cells[sid] = w.cells[sid] || {})[d] = expandCell(dd.cells[sid]);
+    for (const sid in (dd.over || {})) (w.over[sid] = w.over[sid] || {})[d] = dd.over[sid]; });
+  return w;
+}
+const META_DEPTH = { plan: 2, carry: 1, prevNights: 1, base: 1 };
 const Store = {
-  mode: 'none', db: null, dl: null, timers: {}, pending: {}, writing: {}, lastJSON: {}, unsub: [], base: {}, remote: {},
+  mode: 'none', legacy: {}, cur: {}, db: null, dl: null, timers: {}, pending: {}, writing: {}, lastJSON: {}, unsub: [], base: {}, remote: {},
   async init() {
     let db = null;
     if (!STANDALONE) {
@@ -1476,7 +1520,18 @@ const Store = {
     return (this.lsGet('weeks') || []).sort();
   },
   async getWeek(start) {
-    if (this.mode === 'db' || this.mode === 'fb') {
+    if (this.mode === 'fb') {
+      const s = await FBX.fs.doc('weeks/' + start).get(); if (!s.exists) return null;
+      const d = s.data(); let w;
+      if (d.week) { this.legacy[start] = true; w = d.week; } // dữ liệu kiểu cũ: lần lưu tới sẽ tự chuyển sang kiểu mới
+      else {
+        const q = await FBX.fs.collection('weeks/' + start + '/days').get();
+        const days = []; q.docs.forEach(x => { days[+x.id] = x.data(); });
+        w = joinWeek(d.meta, days); this.legacy[start] = false;
+      }
+      this.base['week:' + start] = C.clone(w); return w;
+    }
+    if (this.mode === 'db') {
       const s = await this.D.doc('weeks/' + start).get(); const w = s.exists ? s.data().week : null;
       this.base['week:' + start] = w ? C.clone(w) : undefined; return w;
     }
@@ -1493,7 +1548,7 @@ const Store = {
     const k = kind === 'cfg' ? 'cfg' : 'week:' + start;
     clearTimeout(this.timers[k]);
     if (this.writing[k]) { this.timers[k] = setTimeout(() => this.flush(kind, start), 400); return; }
-    const data = kind === 'cfg' ? S.cfg : (S.week && S.week.start === start ? S.week : null);
+    const data = kind === 'cfg' ? liveCfg() : (S.week && S.week.start === start ? S.week : null);
     if (!data) { delete this.pending[k]; setSave(); return; }
     const json = JSON.stringify(data);
     this.writing[k] = true; delete this.pending[k];
@@ -1511,7 +1566,7 @@ const Store = {
       this.pending[k] = true;
       const code = e && e.code;
       this.error = (e && (e.message || code)) || 'Lỗi lưu';
-      if (code === 'not_granted' || code === 'permission-denied') this.error = 'Bạn không có quyền sửa, thay đổi chưa được lưu';
+      if (code === 'not_granted' || code === 'permission-denied') this.error = FBX.role === 'editor' ? 'Firebase từ chối lưu. Hãy dán lại file firestore.rules mới (Firestore → Rules → Publish).' : 'Bạn không có quyền sửa, thay đổi chưa được lưu';
       if (code === 'quota_exceeded' || code === 'resource-exhausted') this.error = 'Đã hết hạn mức lưu miễn phí hôm nay. Thử lại sau.';
       if (code === 'unavailable') this.error = 'Mất kết nối, sẽ thử lưu lại…';
       if (code === 'unavailable' || code === 'deadline-exceeded') this.timers[k] = setTimeout(() => this.flush(kind, start), 5000);
@@ -1521,6 +1576,7 @@ const Store = {
     if (!this.pending[k] && this.remote[k]) { const r = this.remote[k]; delete this.remote[k]; this.applyRemote(kind, start, r); }
   },
   async fbWrite(kind, start, clean) {
+    if (kind === 'week') return this.fbWriteWeek(start, clean);
     const k = kind === 'cfg' ? 'cfg' : 'week:' + start;
     const ref = FBX.fs.doc(kind === 'cfg' ? 'config/main' : 'weeks/' + start);
     const meta = { updatedAt: new Date().toISOString(), updatedBy: FBX.user ? FBX.user.email : '' };
@@ -1542,9 +1598,37 @@ const Store = {
     }
     this.base[k] = clean;
   },
+  async fbWriteWeek(start, clean) {
+    const k = 'week:' + start, FV = firebase.firestore.FieldValue, FP = firebase.firestore.FieldPath;
+    const info = { updatedAt: new Date().toISOString(), updatedBy: FBX.user ? FBX.user.email : '' };
+    const main = FBX.fs.doc('weeks/' + start), dayRef = d => FBX.fs.doc('weeks/' + start + '/days/' + d);
+    const sp = splitWeek(clean); const base = this.base[k];
+    const full = async () => {
+      const b = FBX.fs.batch();
+      b.set(main, Object.assign({ start, v: 2, meta: sp.meta }, info));
+      DAY_IDS.forEach(d => b.set(dayRef(d), Object.assign({}, sp.days[+d], info)));
+      await b.commit();
+      await FBX.fs.doc('config/weeks').set({ list: FV.arrayUnion(start) }, { merge: true });
+      this.legacy[start] = false;
+    };
+    if (!base || this.legacy[start]) await full();
+    else {
+      const bs = splitWeek(base); const b = FBX.fs.batch(); let n = 0;
+      const toArgs = pairs => { const a = []; for (const [p, v] of pairs) a.push(new FP(...p), v === undefined ? FV.delete() : v); a.push('updatedAt', info.updatedAt, 'updatedBy', info.updatedBy); return a; };
+      const mp = diffTop(bs.meta, sp.meta, 'meta', META_DEPTH);
+      if (mp.length) { b.update(main, ...toArgs(mp)); n++; }
+      DAY_IDS.forEach(d => {
+        const pairs = []; diffRec(bs.days[+d].cells, sp.days[+d].cells, ['cells'], 1, pairs); diffRec(bs.days[+d].over, sp.days[+d].over, ['over'], 1, pairs);
+        if (pairs.length) { b.update(dayRef(d), ...toArgs(pairs)); n++; }
+      });
+      if (n) { try { await b.commit(); } catch (e) { if (e && e.code === 'not-found') await full(); else throw e; } }
+    }
+    this.base[k] = clean;
+  },
+  unsubAll() { this.unsub.forEach(u => { try { u(); } catch (e) {} }); this.unsub = []; clearInterval(this.beatT); },
   async deleteWeek(start) {
     if (this.mode === 'fb') {
-      await FBX.fs.doc('weeks/' + start).delete();
+      const b = FBX.fs.batch(); DAY_IDS.forEach(d => b.delete(FBX.fs.doc('weeks/' + start + '/days/' + d))); b.delete(FBX.fs.doc('weeks/' + start)); await b.commit();
       await FBX.fs.doc('config/weeks').set({ list: firebase.firestore.FieldValue.arrayRemove(start) }, { merge: true });
       delete this.base['week:' + start];
     } else if (this.mode === 'db') await this.db.doc('weeks/' + start).delete();
@@ -1553,6 +1637,7 @@ const Store = {
   applyRemote(kind, start, data) {
     const k = kind === 'cfg' ? 'cfg' : 'week:' + start;
     if (kind === 'cfg') {
+      if (S.cfgLive) { S.cfgLive = data; migrateCfg(S.cfgLive); this.base.cfg = C.clone(data); return; }
       if (JSON.stringify(data) === JSON.stringify(S.cfg)) { this.base.cfg = C.clone(data); return; }
       S.cfg = data; migrateCfg(S.cfg); this.base.cfg = C.clone(data);
       recompute(); render(); toast('Cài đặt vừa được cập nhật' + (this.lastBy ? ' bởi ' + this.lastBy : ''));
@@ -1567,14 +1652,38 @@ const Store = {
   watch() {
     if (this.mode !== 'db' && this.mode !== 'fb') return;
     const D = this.D;
-    this.unsub.forEach(u => { try { u(); } catch (e) {} }); this.unsub = [];
+    this.unsubAll(); this.paused = false;
     this.unsub.push(D.doc('config/main').onSnapshot(s => {
       if (!s.exists || s.metadata.hasPendingWrites) return;
       const d = s.data(); this.lastBy = d.updatedBy && FBX.user && lc(d.updatedBy) !== lc(FBX.user.email) ? d.updatedBy : '';
       if (this.pending.cfg || this.writing.cfg) { this.remote.cfg = d.cfg; return; }
       this.applyRemote('cfg', null, d.cfg);
     }, () => {}));
-    if (S.week) {
+    if (S.week && this.mode === 'fb') {
+      const start = S.week.start, k = 'week:' + start;
+      const cur = this.cur[start] = { meta: null, days: [], nDays: 0, legacy: null };
+      let t = null;
+      const merge = () => { clearTimeout(t); t = setTimeout(() => {
+        if (!S.week || S.week.start !== start) return;
+        let w;
+        if (cur.legacy) w = cur.legacy;
+        else { if (!cur.meta || cur.nDays < 7) return; w = joinWeek(cur.meta, cur.days); }
+        if (this.pending[k] || this.writing[k]) { this.remote[k] = w; return; }
+        this.applyRemote('week', start, w);
+      }, 60); };
+      const by = d => { this.lastBy = d && d.updatedBy && FBX.user && lc(d.updatedBy) !== lc(FBX.user.email) ? d.updatedBy : ''; };
+      this.unsub.push(FBX.fs.doc('weeks/' + start).onSnapshot(s => {
+        if (!s.exists || s.metadata.hasPendingWrites) return;
+        const d = s.data(); if (d.week) { cur.legacy = d.week; by(d); } else { cur.legacy = null; cur.meta = d.meta || {}; if (d.updatedBy) by(d); }
+        merge();
+      }, () => {}));
+      this.unsub.push(FBX.fs.collection('weeks/' + start + '/days').onSnapshot(q => {
+        if (q.metadata && q.metadata.hasPendingWrites) return;
+        cur.days = []; q.docs.forEach(x => { cur.days[+x.id] = x.data(); }); cur.nDays = q.docs.length;
+        const ch = q.docChanges ? q.docChanges() : []; if (ch.length) by(ch[ch.length - 1].doc.data());
+        merge();
+      }, () => {}));
+    } else if (S.week) {
       const start = S.week.start, k = 'week:' + start;
       this.unsub.push(D.doc('weeks/' + start).onSnapshot(s => {
         if (!s.exists || s.metadata.hasPendingWrites) return;
@@ -1604,6 +1713,12 @@ const Store = {
     go(); this.beatT = setInterval(go, 60000);
   }
 };
+// Trang bị ẩn (chuyển tab, tắt màn hình điện thoại) quá 1 phút thì ngừng nhận cập nhật; mở lại thì tải bản mới nhất.
+document.addEventListener('visibilitychange', () => {
+  if (Store.mode !== 'fb' && Store.mode !== 'db') return;
+  if (document.hidden) { clearTimeout(Store.pauseT); Store.pauseT = setTimeout(() => { if (document.hidden) { Store.unsubAll(); Store.paused = true; } }, 60000); }
+  else { clearTimeout(Store.pauseT); if (Store.paused && S.ready) Store.watch(); }
+});
 function isTyping() { const a = document.activeElement; return a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && !$('#modalHost').innerHTML; }
 function setSave() {
   const el = $('#saveSt'); if (!el) return;
@@ -1727,7 +1842,15 @@ async function authAction(a) {
 }
 
 /* ================= TRẠNG THÁI ================= */
+const liveCfg = () => S.cfgLive || S.cfg;
+// Tuần đã chốt hiển thị bằng danh sách nhân viên/slot lưu lúc chốt, nên sửa danh sách hiện tại không làm sai lịch cũ.
+function applyLockView() {
+  if (S.cfgLive) { S.cfg = S.cfgLive; S.cfgLive = null; }
+  if (S.week && S.week.locked && S.week.locked.cfg) { S.cfgLive = S.cfg; S.cfg = Object.assign(C.clone(S.cfg), C.clone(S.week.locked.cfg)); migrateCfg(S.cfg); }
+  document.body.classList.toggle('wklock', !!(S.week && S.week.locked));
+}
 function recompute() {
+  applyLockView();
   if (!S.cfg || !S.week) { S.val = null; S.st = null; return; }
   S.val = C.validate(S.cfg, S.week);
   S.st = C.stats(S.cfg, S.week);
@@ -1735,6 +1858,7 @@ function recompute() {
 function snapshot() { return JSON.stringify(S.week); }
 function mutateWeek(fn, opts = {}) {
   if (!S.week || S.ro) return;
+  if (S.week.locked && !opts.force) { toast('Tuần này đã chốt nên không sửa được. Bấm "Mở khoá" ở đầu trang nếu cần sửa.'); return; }
   S.undo.push(snapshot()); if (S.undo.length > 40) S.undo.shift(); S.redo = [];
   fn(S.week);
   recompute(); Store.save('week', S.week.start);
@@ -1742,6 +1866,7 @@ function mutateWeek(fn, opts = {}) {
 }
 function mutateCfg(fn, opts = {}) {
   if (S.ro) return;
+  if (S.cfgLive) { toast('Đang mở tuần đã chốt (dùng danh sách lúc chốt). Hãy mở một tuần chưa chốt để sửa cài đặt.'); render(); return false; }
   fn(S.cfg); recompute(); Store.save('cfg');
   if (!opts.noRender) render();
 }
@@ -1754,6 +1879,7 @@ const codeOf = c => c ? S.cfg.codes.find(x => C.key(x.code) === C.key(c)) : null
 /* ================= KHỞI ĐỘNG ================= */
 async function boot() {
   render();
+  if (window.__libsReady) { try { await window.__libsReady; } catch (e) {} }
   await Store.init(); setSave();
   if (Store.mode === 'fb') {
     try { await authGate(); }
@@ -1790,6 +1916,7 @@ async function openWeek(start, silent) {
   let w = null;
   try { w = await Store.getWeek(start); } catch (e) { toast('Không mở được tuần ' + start); }
   if (!w) return false;
+  if (S.cfgLive) { S.cfg = S.cfgLive; S.cfgLive = null; }
   S.week = w; S.undo = []; S.redo = []; S.sel = null; S.covSel = null; S.drawer = null;
   for (const s of S.cfg.slots) if (!w.plan[s.id]) { const nw = C.newWeek(S.cfg, start, null); w.plan[s.id] = nw.plan[s.id]; }
   recompute();
@@ -1806,7 +1933,7 @@ function render() {
   if (!S.week) { m.innerHTML = emptyView(); return; }
   const v = { roster: viewRoster, leave: viewLeave, cov: viewCov, plan: viewPlan, stats: viewStats, ts: viewTs, cfg: viewCfg }[S.tab];
   const sx = document.querySelector('.scroll'); const keep = sx ? [sx.scrollLeft, sx.scrollTop] : null;
-  m.innerHTML = v();
+  m.innerHTML = lockBanner() + v();
   const nx = document.querySelector('.scroll'); if (nx && keep && S._keepScroll !== false) { nx.scrollLeft = keep[0]; nx.scrollTop = keep[1]; }
   S._keepScroll = true;
   renderDrawer();
@@ -1849,6 +1976,22 @@ function staffList() {
   return S.cfg.staff.filter(s => (!S.filter.group || s.group === S.filter.group) && (!q || C.key(s.name).includes(q)) &&
     (!S.filter.issues || [0, 1, 2, 3, 4, 5, 6, -1].some(d => S.val.cellIssues[s.id + '|' + d])));
 }
+function lockBanner() {
+  const L = S.week && S.week.locked; if (!L) return '';
+  return '<div class="lockbar">🔒 <b>Tuần đã chốt</b> lúc ' + esc(new Date(L.at).toLocaleString('vi-VN')) + (L.by ? ' bởi ' + esc(L.by) : '') + '. Lịch được giữ nguyên, hiển thị theo danh sách nhân viên và slot tại lúc chốt.' + (S.tab === 'cfg' ? ' <b>Cài đặt bên dưới là bản lúc chốt, chỉ xem. Mở một tuần chưa chốt để sửa cài đặt.</b>' : '') + (S.ro ? '' : ' <button class="btn sm" data-act="unlock-week">Mở khoá để sửa</button>') + '</div>';
+}
+function lockWeek() {
+  const v = S.val; const errs = v ? v.list.filter(x => x.level === 'err').length : 0;
+  modal('Chốt tuần ' + weekName(S.week.start) + '?', '<p style="margin-top:0">Sau khi chốt: tuần này không sửa được nữa (trừ khi mở khoá), và lưu kèm danh sách nhân viên, slot, mã trạng thái hiện tại. Sau này bạn đổi tên, xoá người hay đổi slot thì lịch tuần này vẫn hiển thị đúng như lúc chốt.</p>' + (errs ? '<div class="issue warn">Tuần này còn ' + errs + ' lỗi/vi phạm. Vẫn chốt được, nhưng nên xem lại trước.</div>' : '<div class="issue okk">Không còn lỗi nào. Sẵn sàng chốt.</div>') + '<p class="help">Nên chốt khi tuần đã chạy xong và đã chấm công.</p>',
+    [{ label: 'Huỷ' }, { label: '🔒 Chốt tuần', cls: 'pri', fn: () => {
+      const c = liveCfg();
+      mutateWeek(w => { w.locked = { at: new Date().toISOString(), by: FBX.user ? FBX.user.email : '', cfg: C.clone({ staff: c.staff, slots: c.slots, codes: c.codes, groups: c.groups, rules: c.rules }) }; }, { force: true });
+      toast('Đã chốt tuần ' + weekName(S.week.start));
+    } }]);
+}
+function unlockWeek() {
+  modal('Mở khoá tuần ' + weekName(S.week.start) + '?', '<p style="margin-top:0">Tuần sẽ sửa được lại và hiển thị theo danh sách nhân viên/slot <b>hiện tại</b>. Người đã bị xoá khỏi danh sách sẽ không còn hiện trong tuần này. Khi sửa xong, hãy bấm Chốt tuần lại.</p>', [{ label: 'Huỷ' }, { label: 'Mở khoá', cls: 'danger', fn: () => { mutateWeek(w => { delete w.locked; }, { force: true }); toast('Đã mở khoá'); } }]);
+}
 function viewRoster() {
   const w = S.week, todayIdx = dayIndexToday();
   const list = staffList();
@@ -1859,6 +2002,7 @@ function viewRoster() {
     '<label class="chk"><input type="checkbox" id="ffoot"' + (S.showFoot ? ' checked' : '') + '> Đếm quân số cuối bảng</label>' +
     (S.showFoot ? '<button class="btn sm" data-act="go-foot">↓ Xuống bảng đếm</button>' : '') +
     '<span class="spacer"></span>' +
+    (w.locked ? '' : '<button class="btn edit-only" data-act="lock-week" title="Khoá tuần, lưu kèm danh sách nhân viên lúc này">🔒 Chốt tuần</button>') +
     '<button class="btn edit-only" data-act="open-import" data-k="assign">Nhập từ ảnh / văn bản</button>' +
     '<button class="btn edit-only" data-act="lock-all">Khoá phân công hiện có</button>' +
     '<button class="btn edit-only" data-act="clear-auto">Xoá phân công chưa khoá</button>' +
@@ -2189,12 +2333,35 @@ async function saveAccess() {
   try { await FBX.fs.doc('access/members').set({ editors, viewers, updatedAt: new Date().toISOString(), updatedBy: me }); FBX.members = { editors, viewers }; render(); toast('Đã lưu: ' + editors.length + ' người làm lịch, ' + viewers.length + ' người xem'); }
   catch (e) { toast('Không lưu được: ' + (e.code === 'permission-denied' ? 'không có quyền' : e.message)); }
 }
+function cfgLibs() {
+  if (!STANDALONE || !window.__LIBS) return '';
+  const src = window.__libSrc || {};
+  const allLocal = window.__LIBS.every(L => src[L.name] === 'kho' || src[L.name] === 'có sẵn');
+  return '<label><b>Thư viện của trang · ' + (allLocal ? '<span style="color:var(--ok)">✓ Đã lưu trong kho GitHub</span>' : '<span style="color:var(--warn)">Đang tải từ mạng ngoài</span>') + '</b>' +
+    '<span>' + window.__LIBS.map(L => esc(L.name) + ': ' + esc(src[L.name] || '?')).join(' · ') + '</span>' +
+    (allLocal ? '' : '<span>Để trang không phụ thuộc máy chủ bên ngoài: bấm nút dưới để tải file <b>lib.zip</b>, giải nén ra thư mục <b>lib</b>, rồi tải cả thư mục lên kho GitHub (Add file → Upload files, kéo thả thư mục lib). Làm một lần là xong.</span><button class="btn" data-act="dl-libs">Tải bộ thư viện (lib.zip)</button>') + '</label>';
+}
+async function downloadLibs(btn) {
+  btn.disabled = true; btn.textContent = 'Đang tải…';
+  try {
+    const files = [];
+    for (const L of window.__LIBS) {
+      const r = await fetch(L.cdn, { mode: 'cors' }); if (!r.ok) throw new Error(L.name + ' lỗi ' + r.status);
+      files.push({ name: 'lib/' + L.name, data: new Uint8Array(await r.arrayBuffer()) });
+    }
+    files.push({ name: 'lib/DOC-TOI.txt', data: 'Thư viện dùng cho Phân Ca Sân Bay. Tải cả thư mục lib lên kho GitHub, cùng chỗ với index.html.\n' + COPYRIGHT + '\n' });
+    await saveFile('lib.zip', new Blob([XW.zip(files)], { type: 'application/zip' }));
+  } catch (e) {
+    modal('Không tải tự động được', '<p style="margin-top:0">Trình duyệt chặn tải (' + esc(e.message) + '). Hãy mở từng link, bấm chuột phải → Lưu thành, lưu vào thư mục <b>lib</b>, rồi tải thư mục lên GitHub:</p><ul class="help">' + window.__LIBS.map(L => '<li><a href="' + L.cdn + '" target="_blank" rel="noopener">' + esc(L.name) + '</a></li>').join('') + '</ul>', [{ label: 'Đóng', cls: 'pri' }]);
+  }
+  btn.disabled = false; btn.textContent = 'Tải bộ thư viện (lib.zip)';
+}
 function cfgData() {
   const dl = !!Store.dl;
   return '<div class="formgrid">' +
     '<label><b>Nhập từ ảnh, văn bản, CSV</b><span>Ảnh chụp giấy viết tay, bảng copy từ Excel/Google Sheets/Zalo, file CSV. Có bước kiểm tra, sửa trước khi nhập, và tự sao lưu.</span><button class="btn pri" data-act="open-import">Nhập dữ liệu…</button></label>' +
     '<label><b>Bản sao lưu tự động</b><span>Mỗi lần nhập, máy tự sao lưu tuần trước khi ghi (giữ 30 bản gần nhất). Khôi phục được bất cứ lúc nào.</span><button class="btn" data-act="open-backups">Xem và khôi phục…</button></label>' +
-    cfgAI() +
+    cfgAI() + cfgLibs() +
     '<label><b>Nhập file Excel lịch tuần</b><span>Đọc file cùng định dạng file LỊCH … HAO.xlsx: lịch bay ở trên, nhân viên ở dưới, mỗi ngày 2 cột. Nhân viên mới được thêm vào danh sách, nhóm lấy theo màu ô tên. Tuần trong file sẽ được tạo hoặc ghi đè.</span><button class="btn pri" data-act="import-xlsx">Chọn file Excel…</button></label>' +
     '<label><b>Xuất Excel tuần đang mở</b><span>Gồm các sheet: Lịch tuần, Quân số, Thống kê, Chấm công.</span><button class="btn" data-act="export-xlsx"' + (dl ? '' : ' disabled') + '>Tải file Excel</button>' + (dl ? '' : '<span class="muted">Không tải được file trong chế độ xem này.</span>') + '</label>' +
     '<label><b>Sao lưu toàn bộ</b><span>Một file JSON chứa cài đặt và mọi tuần. Nên tải về sau mỗi tuần.</span><button class="btn" data-act="export-json"' + (dl ? '' : ' disabled') + '>Tải bản sao lưu</button></label>' +
@@ -2341,6 +2508,7 @@ async function newWeekFlow() {
       if (S.weeks.includes(start)) { toast('Tuần ' + weekName(start) + ' đã có. Mở tuần đó.'); await openWeek(start); return false; }
       const mode = (host.querySelector('input[name=nw]:checked') || {}).value || 'blank';
       const prev = S.week && mode !== 'blank' ? S.week : null;
+      if (S.cfgLive) { S.cfg = S.cfgLive; S.cfgLive = null; }
       const w = C.newWeek(S.cfg, start, prev);
       if (mode === 'blank' && S.week) { const tmp = C.newWeek(S.cfg, start, S.week); w.carry = tmp.carry; w.prevNights = tmp.prevNights; for (const s of S.cfg.slots) w.plan[s.id] = C.newWeek(S.cfg, start, null).plan[s.id]; }
       if (mode === 'all') for (const sid in S.week.cells) for (const d in S.week.cells[sid]) { const c = S.week.cells[sid][d]; if (c.items && c.items.length) { w.cells[sid] = w.cells[sid] || {}; w.cells[sid][d] = { status: '', note: '', items: c.items.map(i => ({ slot: i.slot, role: i.role })) }; } }
@@ -2365,7 +2533,7 @@ async function exportJson() {
   if (!Store.dl) { toast('Chế độ xem này không cho tải file.'); return; }
   const weeks = {};
   for (const w of S.weeks) { const x = (S.week && S.week.start === w) ? S.week : await Store.getWeek(w); if (x) weeks[w] = x; }
-  saveFile('phan-ca-sao-luu-' + C.isoDate(new Date()) + '.json', JSON.stringify({ app: 'phan-ca-san-bay', version: 1, copyright: COPYRIGHT, publishedAt: new Date().toISOString(), cfg: S.cfg, weeks }));
+  saveFile('phan-ca-sao-luu-' + C.isoDate(new Date()) + '.json', JSON.stringify({ app: 'phan-ca-san-bay', version: 1, copyright: COPYRIGHT, publishedAt: new Date().toISOString(), cfg: liveCfg(), weeks }));
 }
 function readFile(input, asText) {
   return new Promise((res, rej) => {
@@ -2390,7 +2558,7 @@ async function importXlsx() {
     const pad = Array(off).fill([]); const all = pad.concat(aoa);
     const fills = (r, c) => { const cell = ws[XLSX.utils.encode_cell({ r, c })]; const s = cell && cell.s; return s && s.fgColor && s.fgColor.rgb ? s.fgColor.rgb : null; };
     let res;
-    try { res = C.parseRosterAOA(all, fills, S.cfg); } catch (e) { toast(e.message); return; }
+    try { res = C.parseRosterAOA(all, fills, liveCfg()); } catch (e) { toast(e.message); return; }
     const exists = S.weeks.includes(res.week.start);
     const newStaff = res.cfg.staff.length - S.cfg.staff.length;
     const nItems = Object.values(res.week.cells).reduce((a, x) => a + Object.values(x).reduce((b, c) => b + (c.items || []).length, 0), 0);
@@ -2402,7 +2570,7 @@ async function importXlsx() {
       '<label class="opt"><input type="radio" name="im" value="all"' + (exists ? '' : ' checked') + '><div><b>Toàn bộ</b><span>' + (exists ? 'Ghi đè cả tuần bằng nội dung file.' : 'Tạo tuần mới từ file.') + '</span></div></label>',
       [{ label: 'Huỷ' }, { label: 'Nhập', cls: 'pri', fn: async host => {
         const mode = host.querySelector('input[name=im]:checked').value;
-        S.cfg = res.cfg; migrateCfg(S.cfg); Store.save('cfg');
+        S.cfgLive = null; S.cfg = res.cfg; migrateCfg(S.cfg); Store.save('cfg');
         const start = res.week.start;
         if (mode === 'all') {
           S.week = res.week;
@@ -2435,7 +2603,7 @@ async function importJson() {
   const ws = Object.keys(obj.weeks);
   modal('Khôi phục bản sao lưu', '<p style="margin:0">' + obj.cfg.staff.length + ' nhân viên, ' + ws.length + ' tuần. Cài đặt hiện tại và các tuần trùng ngày sẽ bị ghi đè.</p>',
     [{ label: 'Huỷ' }, { label: 'Khôi phục', cls: 'pri', fn: async () => {
-      S.cfg = obj.cfg; migrateCfg(S.cfg); await Store.flushNow('cfg');
+      S.cfgLive = null; S.cfg = obj.cfg; migrateCfg(S.cfg); await Store.flushNow('cfg');
       for (const w of ws) { S.week = obj.weeks[w]; await Store.flush('week', w); }
       S.weeks = [...new Set([...S.weeks, ...ws])].sort();
       await openWeek(S.weeks[S.weeks.length - 1]); S.ready = true; render(); toast('Đã khôi phục');
@@ -2467,7 +2635,9 @@ document.addEventListener('click', async e => {
     case 'wk-del': deleteWeek(); break;
     case 'undo': undo(); break;
     case 'redo': redo(); break;
-    case 'auto': if (w) openAuto(); break;
+    case 'auto': if (w && w.locked) { toast('Tuần đã chốt. Mở khoá trước khi chia lại.'); break; } if (w) openAuto(); break;
+    case 'lock-week': lockWeek(); break;
+    case 'unlock-week': unlockWeek(); break;
     case 'go-cfg': e.preventDefault(); S.tab = 'cfg'; S.cfgTab = 'staff'; render(); break;
     case 'cell': if (S.ro) break; S.sel = { sid: t.dataset.sid, d: +t.dataset.d }; render(); break;
     case 'sel-move': {
@@ -2516,15 +2686,15 @@ document.addEventListener('click', async e => {
     }
     case 'ts-day': S.tsDay = +t.dataset.d; render(); break;
     case 'cfg-tab': S.cfgTab = t.dataset.k; S._keepScroll = false; render(); break;
-    case 'staff-add': mutateCfg(c => c.staff.push(C.newStaff('Nhân viên mới', { group: 3 }))); toast('Đã thêm. Sửa tên ở dòng cuối.'); break;
+    case 'staff-add': if (mutateCfg(c => c.staff.push(C.newStaff('Nhân viên mới', { group: 3 }))) !== false) toast('Đã thêm. Sửa tên ở dòng cuối.'); break;
     case 'staff-del': {
       const sf = staffById(t.dataset.sid);
-      modal('Xoá ' + sf.name + '?', '<p style="margin:0">Người này sẽ biến khỏi danh sách và mọi tuần. Nếu chỉ nghỉ tạm, hãy bỏ chọn "Đang làm".</p>', [{ label: 'Huỷ' }, { label: 'Xoá', cls: 'danger', fn: () => { mutateCfg(c => c.staff = c.staff.filter(s => s.id !== sf.id)); } }]); break;
+      modal('Xoá ' + sf.name + '?', '<p style="margin:0">Nếu người này nghỉ việc hoặc chuyển bộ phận, nên chọn <b>Chuyển sang tạm nghỉ</b>: tên vẫn còn trong các tuần cũ, chỉ không được xếp lịch nữa.</p><p class="help">Xoá hẳn: các tuần <b>đã chốt</b> vẫn giữ tên, nhưng các tuần chưa chốt sẽ mất người này.</p>', [{ label: 'Huỷ' }, { label: 'Xoá hẳn', cls: 'danger', fn: () => { mutateCfg(c => c.staff = c.staff.filter(s => s.id !== sf.id)); } }, { label: 'Chuyển sang tạm nghỉ', cls: 'pri', fn: () => { mutateCfg(c => { const x = c.staff.find(s => s.id === sf.id); x.active = false; x.auto = false; }); toast('Đã chuyển ' + sf.name + ' sang tạm nghỉ'); } }]); break;
     }
     case 'slot-add': mutateCfg(c => c.slots.push({ id: 'MOI' + (c.slots.length + 1), airline: '', flight: '', time: '1200', route: '', demand: { A: 2 }, night: false, nightWeight: 0, days: [1, 1, 1, 1, 1, 1, 1], dayLabels: {}, before: null, after: null, active: true, note: '' })); break;
     case 'slot-del': {
       const s = S.cfg.slots[+t.dataset.i];
-      modal('Xoá slot ' + s.id + '?', '<p style="margin:0">Phân công đang dùng slot này sẽ không còn được tính.</p>', [{ label: 'Huỷ' }, { label: 'Xoá', cls: 'danger', fn: () => { mutateCfg(c => c.slots.splice(+t.dataset.i, 1)); } }]); break;
+      modal('Xoá slot ' + s.id + '?', '<p style="margin:0">Nếu chuyến chỉ tạm ngừng, nên chọn <b>Tắt slot</b>: lịch cũ vẫn giữ nguyên.</p><p class="help">Xoá hẳn: tuần đã chốt vẫn giữ, tuần chưa chốt sẽ không còn tính slot này.</p>', [{ label: 'Huỷ' }, { label: 'Xoá hẳn', cls: 'danger', fn: () => { mutateCfg(c => c.slots.splice(+t.dataset.i, 1)); } }, { label: 'Tắt slot', cls: 'pri', fn: () => { mutateCfg(c => { c.slots[+t.dataset.i].active = false; }); toast('Đã tắt slot ' + s.id); } }]); break;
     }
     case 'code-add': mutateCfg(c => c.codes.push({ code: 'MÃ', label: '', block: 'none', off: 0, kind: 'duty' })); break;
     case 'code-del': mutateCfg(c => c.codes.splice(+t.dataset.i, 1)); break;
@@ -2534,6 +2704,7 @@ document.addEventListener('click', async e => {
     case 'export-json': exportJson(); break;
     case 'open-import': openImport(t.dataset.k); break;
     case 'open-backups': openBackups(); break;
+    case 'dl-libs': downloadLibs(t); break;
     case 'gem-save': { const k = ($('#gemKey').value || '').trim(), m = ($('#gemModel').value || '').trim() || 'auto'; if (!/^(AIza[\w-]{20,}|AQ\.[\w.-]{20,})$/.test(k)) { toast('Khoá không đúng dạng (bắt đầu bằng AIza… hoặc AQ.…)'); break; } if (window.FIREBASE_CONFIG && k === window.FIREBASE_CONFIG.apiKey) { toast('Đây là khoá Firebase, không dùng được cho Gemini. Hãy tạo khoá riêng tại aistudio.google.com/apikey.'); break; } t.disabled = true; t.textContent = 'Đang kiểm tra…';
       try { await saveSharedKey(k, m); await testSharedKey(); toast('Đã bật AI cho tất cả người làm lịch'); } catch (e) { toast('Đã lưu khoá nhưng kiểm tra lỗi: ' + e.message); } render(); break; }
     case 'gem-test': t.disabled = true; try { await testSharedKey(); toast('Khoá hoạt động tốt'); } catch (e) { toast('Lỗi: ' + e.message); } t.disabled = false; break;
@@ -2932,7 +3103,7 @@ function aiPrompt(kind, hasText) {
 const Backup = {
   async create(label) {
     const id = 'b' + Date.now();
-    const rec = { id, at: new Date().toISOString(), by: FBX.user ? FBX.user.email : '', label, week: S.week ? S.week.start : '', data: JSON.parse(JSON.stringify({ week: S.week, cfg: S.cfg })) };
+    const rec = { id, at: new Date().toISOString(), by: FBX.user ? FBX.user.email : '', label, week: S.week ? S.week.start : '', data: JSON.parse(JSON.stringify({ week: S.week, cfg: liveCfg() })) };
     const meta = { id, at: rec.at, by: rec.by, label, week: rec.week };
     if (Store.mode === 'fb' || Store.mode === 'db') {
       try {
@@ -2986,6 +3157,7 @@ async function openBackups() {
 
 /* ---------- Trình nhập ---------- */
 function openImport(kind) {
+  if (S.week && S.week.locked) { toast('Tuần đang mở đã chốt. Mở khoá hoặc chuyển sang tuần khác để nhập.'); return; }
   if (S.ro || !S.week) { if (!S.week) toast('Hãy tạo hoặc mở một tuần trước.'); return; }
   S.imp = { step: 'source', kind: kind || 'auto', week: S.week.start, src: 'image', files: [], text: '', recs: [], warnings: [], engine: null, onlyIssues: false, mode: 'replace' };
   aiEngine().then(e => {
