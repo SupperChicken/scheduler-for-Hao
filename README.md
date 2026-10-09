@@ -24,6 +24,9 @@ Công cụ chia lịch và chấm công cho nhân viên phục vụ chuyến bay
 | `index.html` | Toàn bộ ứng dụng | Có |
 | `firebase-config.js` | Cấu hình kết nối Firebase (bạn sửa ở bước 3) | Có |
 | `.nojekyll` | Để GitHub Pages phục vụ file nguyên trạng | Có |
+| `manifest.webmanifest`, `sw.js`, `icon-192.png`, `icon-512.png`, `icon-512-maskable.png` | Cài trang như app trên điện thoại, mở nhanh hơn | Có |
+| `backup-drive.gs`, `appsscript.json` | Mã tự sao lưu ra Google Drive (dán vào script.google.com, không cần đưa lên GitHub) | Không |
+| `CHANGELOG.md` | Nhật ký các bản cập nhật | Nên có |
 | `lib/` (thư mục) | Bản sao thư viện (Excel, Firebase) để trang không phụ thuộc máy chủ ngoài. Tải bằng nút trong trang, xem mục *Cập nhật bản mới* | Nên có |
 | `firestore.rules` | Luật bảo mật, dán vào Firebase ở bước 4 | Không bắt buộc |
 | `README.md` | Hướng dẫn này | Không bắt buộc |
@@ -140,10 +143,25 @@ Khi tuần đã chạy xong và chấm công xong, bấm **🔒 Chốt tuần** 
 
 ## Cập nhật bản mới (khi nhận index.html mới)
 
+> **Bản tháng 10/2026 (nhật ký thay đổi, mã NV, báo cáo tháng, cài như app, nhiều đơn vị):** tải lên GitHub `index.html`, `sw.js`, `manifest.webmanifest` và 3 file `icon-*.png`, `CHANGELOG.md`; **dán lại `firestore.rules`** (có thêm luật cho nhật ký và đơn vị). Giữ nguyên `firebase-config.js` và thư mục `lib/`. Nếu chưa dán luật mới, trang vẫn chạy bình thường, chỉ chưa ghi được nhật ký.
+
 1. Trên GitHub, mở kho → bấm vào `index.html` → biểu tượng bút ✏️ hoặc *Add file → Upload files*, kéo `index.html` mới vào, bấm **Commit changes**.
 2. **Dán lại `firestore.rules`** vào Firebase (Firestore Database → Rules → dán → **Publish**). Bản này lưu mỗi tuần thành 7 phần nhỏ theo ngày; nếu chưa dán luật mới, khi lưu sẽ báo *"Không có quyền ghi… hãy dán lại firestore.rules"*.
 3. Lần đầu dùng bản này, người làm lịch mở trang một lần: tuần đang mở tự chuyển sang dạng mới khi lưu, không cần làm gì.
 4. **Thư viện tự lưu (làm một lần):** vào **Cài đặt & dữ liệu → Nhập / xuất dữ liệu**, mục *Thư viện của trang*, bấm **Tải bộ thư viện (lib.zip)**, giải nén ra được thư mục `lib`, rồi tải cả thư mục lên GitHub (*Add file → Upload files*, kéo thư mục `lib` vào). Từ đó trang dùng bản trong kho; nếu thiếu thì tự lấy từ mạng như cũ.
+
+## Thêm đơn vị mới (nhiều trạm dùng chung một dự án Firebase)
+
+1. Trên GitHub tạo thư mục mới trong kho, ví dụ `tram2/`, tải vào đó đúng các file như thư mục gốc (`index.html`, `sw.js`, `manifest.webmanifest`, `icon-*.png`, `.nojekyll` không cần).
+2. Tạo `tram2/firebase-config.js` giống file gốc, thêm 2 dòng trong `window.FIREBASE_CONFIG = { … }`:
+   ```
+   unit: 'tram2',
+   unitName: 'Trạm 2',
+   ```
+3. Mở `https://<tên>.github.io/<kho>/tram2/`, đăng nhập bằng email chủ dự án, nhập nhân viên / lịch như lần đầu, rồi cấp quyền ở Cài đặt → Quyền truy cập.
+4. `firestore.rules` mới đã có sẵn luật cho mọi đơn vị (`units/{mã}`), không phải sửa gì thêm. Email trong `OWNERS` là người quản lý chung của tất cả đơn vị.
+
+Mỗi đơn vị có nhân viên, chuyến bay, người làm lịch, nhật ký, sao lưu riêng. Tự sao lưu ra Drive: trong mã `backup-drive.gs` điền `UNIT = 'tram2'` (nút *Hướng dẫn* trong trang của đơn vị đó đã điền sẵn).
 
 ## Gửi lịch qua Email, Telegram, Zalo (miễn phí)
 
