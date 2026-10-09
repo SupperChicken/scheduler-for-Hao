@@ -309,7 +309,7 @@ td.c{text-align:center}
   .scroll{max-height:calc(100vh - 250px)}
   .name{min-width:120px;max-width:140px}
 }
-.fp .dm{display:block}.fp .dm.dly{cursor:pointer;color:var(--mute)}.fp .dm.dly.on{color:var(--err);font-weight:600}
+.fp .dm{display:block}.fp .dm.pnote{cursor:default;color:var(--ink);font-family:inherit;white-space:normal}.cntbox{border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:8px 0;font-size:13px;background:var(--panel2);display:flex;flex-direction:column;gap:4px}.cntbox .chk{white-space:normal}.cntbox ul{margin:4px 0;padding-left:18px}.cntbox summary{cursor:pointer}.warnt{color:var(--warn,#b26a00)}.fp .dm.dly{cursor:pointer;color:var(--mute)}.fp .dm.dly.on{color:var(--err);font-weight:600}
 </style>
 
 <div class="app" id="app">
@@ -338,6 +338,7 @@ td.c{text-align:center}
     <button class="tab" data-tab="cov">Quân số</button>
     <button class="tab edit-only" data-tab="plan">Lịch bay</button>
     <button class="tab" data-tab="stats">Thống kê</button>
+    <button class="tab edit-only" data-tab="skills">Năng lực</button>
     <button class="tab edit-only" data-tab="ts">Chấm công</button>
     <button class="tab edit-only" data-tab="cfg">Cài đặt &amp; dữ liệu</button>
   </nav>
@@ -401,6 +402,7 @@ const Core = (() => {
   const clone = o => JSON.parse(JSON.stringify(o));
   const norm = s => String(s == null ? '' : s).replace(/ /g, ' ').replace(/\s+/g, ' ').trim();
   const key = s => norm(s).toUpperCase().normalize('NFC');
+  const noDia = s => norm(s).toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/Đ/g, 'D');
 
   /* ---------- mặc định ---------- */
   function defaultRules() {
@@ -621,6 +623,13 @@ const Core = (() => {
     if (role && role !== 'A' && !(sf.roles || []).includes(role)) why.push('Chưa được làm vị trí /' + role);
     if (sf.allow && sf.allow.length && !sf.allow.includes(slotId) && !sf.allow.includes(s.airline)) why.push('Không thuộc hãng được làm');
     if (s.night && sf.noNight) why.push('Nhân viên không làm đêm');
+    // bảng năng lực (chỉ người làm lịch có): ✕ không xếp hãng này; hãng bị khoá chỉ cho người đã có năng lực
+    const SK = cfg.skills;
+    if (SK) {
+      const air = s.airline || slotId, lv = (SK.lv[sf.id] || {})[air] || '';
+      if (lv === 'x') why.push('⚠ Không xếp hãng ' + air + ' (bảng năng lực)');
+      else if (SK.locks[air] && !lv) why.push('⚠ Chưa có năng lực hãng ' + air + ' (hãng đang khoá)');
+    }
     const w = windowOf(cfg, week, s, d);
     const cell = cellOf(week, sf.id, d);
     const code = statusCode(cfg, cm, cell);
@@ -767,7 +776,7 @@ const Core = (() => {
   // người gần đủ điều kiện nhất cho một vị trí, kèm luật họ vượt
   function diagnose(cfg, week, pos, limit) {
     const ctx = makeCtx(cfg, week), cm = codeMap(cfg); const res = [];
-    const soft = m => /^Quá \d+ đêm/.test(m) ? 1 : /^Quá \d+ ngày làm/.test(m) ? 1 : /^Quá \d+ slot/.test(m) ? 2 : /^Nghỉ </.test(m) ? 2 : /^Trùng giờ/.test(m) ? 4 : /^Không thuộc hãng/.test(m) ? 3 : /^Chưa được làm vị trí/.test(m) ? 4 : 9;
+    const soft = m => /năng lực/.test(m) ? 3 : /^Quá \d+ đêm/.test(m) ? 1 : /^Quá \d+ ngày làm/.test(m) ? 1 : /^Quá \d+ slot/.test(m) ? 2 : /^Nghỉ </.test(m) ? 2 : /^Trùng giờ/.test(m) ? 4 : /^Không thuộc hãng/.test(m) ? 3 : /^Chưa được làm vị trí/.test(m) ? 4 : 9;
     for (const sf of cfg.staff) {
       if (!sf.active || sf.kind !== 'flight') continue;
       let why = checkAssign(ctx, sf, pos.slot, pos.d, pos.role);
@@ -907,6 +916,11 @@ const Core = (() => {
       if ((role === 'A' || !role) && isSup(sf)) v += r.wSupOnAgent;
       if ((role === 'A' || !role) && (sf.roles || []).length > 1) v += 0.3 * ((sf.roles || []).length - 1);
       if (!st.perDay[d]) v += r.wNewDay;
+      if (cfg.skills) {
+        const air = slot.airline || slot.id, lv = (cfg.skills.lv[sf.id] || {})[air] || '';
+        v += (+r.wSkill || 1.5) * ({ star: -1.5, good: -0.8, done: 0, learn: 1.2, '': 1.2 }[lv] || 0);
+        if (role === 'S' && !((cfg.skills.sup[sf.id] || {})[air])) v += 2;
+      }
       if (L) {
         v -= (+r.wAff || 0) * affOf(L, sf.id, slot);
         const today = st.items.filter(i => i.d === d);
@@ -1111,7 +1125,7 @@ const Core = (() => {
   const FLIGHT_RE = /^(TW\d|LJ\d|AK\d|Z2|RS|VZ\d|FD\d|OD|BX1-2|BX\d|HX\d|MH\d?|EK|G\d|LJ3-4)(?:\s*\/\s*([A-Z0-9 ]+))?$/;
   function parseToken(tok, cfg, cm) {
     let t = norm(tok); if (!t) return null;
-    let up = t.toUpperCase().replace(/^Z 2/, 'Z2').replace(/^M H/, 'MH');
+    let up = t.toUpperCase().replace(/^Z 2/, 'Z2').replace(/^M H/, 'MH').replace(/^H X/, 'HX').replace(/^B X/, 'BX').replace(/^R S/, 'RS').replace(/^E K/, 'EK').replace(/^T W/, 'TW').replace(/^O D/, 'OD');
     const code = cm[key(t)];
     if (code) return { type: 'status', code: code.code };
     const m = up.replace(/\s+(?=\/)/g, '').match(FLIGHT_RE);
@@ -1158,62 +1172,106 @@ const Core = (() => {
     }
     return out;
   }
+  // tách tên và các ký hiệu sau tên: hãng được làm (EK, MH, HX, LJ, RS, OD, FD, AK, VZ, TW, BX…), KD (không làm đêm), X
+  const NAME_TAGS = { AKFD: ['AK', 'FD'], VZTW: ['VZ', 'TW'], VZBX: ['VZ', 'BX'], OD: ['OD'], EK: ['EK'], MH: ['MH'], HX: ['HX'], LJ: ['LJ'], RS: ['RS'], FD: ['FD'], AK: ['AK'], VZ: ['VZ'], TW: ['TW'], BX: ['BX'], Z2: ['Z2'], KD: ['KD'], X: ['X'] };
   function splitName(raw) {
-    let name = norm(raw); const tags = []; let noNight = false;
-    const m = name.match(/\s+(KD|AKFD|VZTW|VZBX|LJ)$/i);
-    if (m) { tags.push(m[1].toUpperCase()); name = norm(name.slice(0, m.index)); if (m[1].toUpperCase() === 'KD') noNight = true; }
-    return { name, tags, noNight };
+    let name = norm(raw).toUpperCase() === norm(raw) ? norm(raw) : norm(raw); const tags = []; let noNight = false;
+    // gộp chữ cách quãng: "O D" -> "OD", "B X" -> "BX", "T W" -> "TW", "H X" -> "HX"
+    let s = ' ' + name.replace(/\s*\+\s*/g, ' ') + ' ';
+    s = s.replace(/ (O) (D) /g, ' OD ').replace(/ (B) (X) /g, ' BX ').replace(/ (T) (W) /g, ' TW ').replace(/ (H) (X) /g, ' HX ').replace(/ (F) (D) /g, ' FD ').replace(/ (A) (K) /g, ' AK ').replace(/ (V) (Z) /g, ' VZ ').replace(/ (R) (S) /g, ' RS ').replace(/ (E) (K) /g, ' EK ').replace(/ (L) (J) /g, ' LJ ').replace(/ (K) (D) /g, ' KD ');
+    let words = norm(s).split(' ');
+    while (words.length > 1) {
+      const w = words[words.length - 1].toUpperCase();
+      if (!NAME_TAGS[w]) break;
+      // giữ lại nếu từ trước đó là số thứ tự (vd "NGỌC 2") — chỉ bỏ ký hiệu, không bỏ số
+      for (const t of NAME_TAGS[w]) if (!tags.includes(t)) tags.unshift(t);
+      words.pop();
+    }
+    if (tags.includes('KD')) noNight = true;
+    return { name: norm(words.join(' ')), tags, noNight };
   }
   function parseRosterAOA(aoa, fills, cfgIn) {
     const cfg = cfgIn ? clone(cfgIn) : emptyConfig();
     const cm = codeMap(cfg);
     const cellStr = (r, c) => (aoa[r] && aoa[r][c] != null) ? aoa[r][c] : '';
-    // tìm dòng ngày
-    let start = null;
-    for (let r = 0; r < Math.min(6, aoa.length) && !start; r++) {
-      const v = cellStr(r, 2);
-      if (v instanceof Date) start = isoDate(v);
-      else if (typeof v === 'number' && v > 40000) { const d = new Date(Math.round((v - 25569) * 86400000)); start = isoDate(new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())); }
-      else if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v)) start = v.slice(0, 10);
-    }
-    if (!start) throw new Error('Không thấy ngày bắt đầu tuần ở ô C1. Kiểm tra lại định dạng file.');
+    // tìm dòng ngày (ô ngày đầu tiên trong 6 dòng đầu) — hỗ trợ cả mẫu cũ (C1) và mẫu mới (E1 / F1)
+    const asDate = v => {
+      if (v instanceof Date) return isoDate(v);
+      if (typeof v === 'number' && v > 40000 && v < 80000) { const d = new Date(Math.round((v - 25569) * 86400000)); return isoDate(new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())); }
+      if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v)) return v.slice(0, 10);
+      return null;
+    };
+    let start = null, dateCol = -1;
+    for (let r = 0; r < Math.min(6, aoa.length) && !start; r++) for (let cc = 0; cc < 12 && !start; cc++) { const d = asDate(cellStr(r, cc)); if (d) { start = d; dateCol = cc; } }
+    if (!start) throw new Error('Không thấy ngày bắt đầu tuần ở dòng đầu file. Kiểm tra lại định dạng file.');
     start = mondayOf(start);
     const week = newWeek(cfg, start, null);
-    // xác định dòng nhân viên: cột Q (16) là số
+    // cột mã chuyến / tên nhân viên: cột bên trái ngày có nhiều mã chuyến nhất
+    const SLOT_KEY = /^(TW|LJ|AK|Z ?2|RS|VZ|FD|OD|BX|HX|MH|EK|G)\s*\d?\s*$/i;
+    let keyCol = 0, best = -1;
+    for (let cc = 0; cc < dateCol; cc++) { let n = 0; for (let r = 0; r < Math.min(60, aoa.length); r++) if (SLOT_KEY.test(norm(cellStr(r, cc)))) n++; if (n > best) { best = n; keyCol = cc; } }
+    const dc = d => dateCol + 2 * d; // mỗi ngày 2 cột: trạng thái + chuyến
+    // xác định dòng nhân viên: tên ở cột mã + có số thứ tự bên trái (mẫu mới) hoặc số đếm ở cột Q (mẫu cũ)
     let firstStaff = -1, ticketRow = -1;
     for (let r = 0; r < aoa.length; r++) {
-      const a = norm(cellStr(r, 0)).toUpperCase();
-      if (firstStaff < 0 && a && typeof cellStr(r, 16) === 'number') firstStaff = r;
-      if (a === 'TICKET') { ticketRow = r; break; }
+      const a = norm(cellStr(r, keyCol)).toUpperCase();
+      const numL = keyCol > 0 && typeof cellStr(r, keyCol - 1) === 'number', numQ = typeof cellStr(r, 16) === 'number' && keyCol === 0;
+      if (firstStaff < 0 && a && !SLOT_KEY.test(a) && /[A-ZÀ-Ỹ]{2}/.test(a) && (numL || numQ)) firstStaff = r;
+      if (firstStaff >= 0 && a === 'TICKET') { ticketRow = r; break; }
     }
-    if (firstStaff < 0) throw new Error('Không tìm thấy danh sách nhân viên (cột A + số đếm ở cột Q).');
+    if (firstStaff < 0) throw new Error('Không tìm thấy danh sách nhân viên (tên + số thứ tự).');
     // lịch bay
-    const rowToSlot = { BX2: 'BX1-2', 'Z2': 'Z2' };
+    const rowToSlot = { BX2: 'BX1-2', Z2: 'Z2', MH1: 'MH' };
+    let prevSlot = null;
     for (let r = 0; r < firstStaff; r++) {
-      let a = norm(cellStr(r, 0)).toUpperCase().replace(/\s/g, ''); if (!a) continue;
+      let a = norm(cellStr(r, keyCol)).toUpperCase().replace(/\s/g, '');
+      const vals = [0, 1, 2, 3, 4, 5, 6].map(d => norm(cellStr(r, dc(d))));
+      if (!a) {
+        // dòng không mã ngay dưới một chuyến (vd MH8781 dưới MH) = chuyến thứ 2 của hãng đó
+        if (prevSlot && vals.some(v => /\d{3,4}/.test(v)) && cfg.slots.find(x => x.id === prevSlot + '2')) a = prevSlot + '2'; else { prevSlot = null; continue; }
+      } else if (!SLOT_KEY.test(a) && !rowToSlot[a]) { prevSlot = null; continue; }
       const sid = rowToSlot[a] || a;
-      const s = cfg.slots.find(x => x.id === sid); if (!s) continue;
+      let s = cfg.slots.find(x => x.id === sid);
+      if (!s && vals.some(v => /\d{4}/.test(v))) {
+        // chuyến mới có trong file (vd AK4): tự thêm, chưa có định mức
+        const tm = (vals.find(v => /\b\d{4}\b/.test(v)) || '').match(/\b(\d{4})\b/); const t = tm ? tm[1] : '1200'; const hh = +t.slice(0, 2);
+        s = { id: sid, airline: sid.replace(/[\d-]+$/, ''), flight: (vals.find(Boolean) || '').split(' ')[0], time: t, route: '', demand: {}, night: hh >= 22 || hh < 6, nightWeight: hh >= 22 || hh < 6 ? 2 : 0, days: [1, 1, 1, 1, 1, 1, 1], dayLabels: {}, before: null, after: null, active: true, note: 'Thêm từ file Excel' };
+        cfg.slots.push(s);
+      }
+      if (!s) { prevSlot = null; continue; }
+      prevSlot = sid.replace(/\d+$/, '') === sid ? sid : sid.replace(/\d+$/, '');
+      if (sid === 'MH') prevSlot = 'MH';
       for (let d = 0; d < 7; d++) {
-        const v = norm(cellStr(r, 2 + 2 * d));
+        const v = vals[d];
         const canx = /CANX|CNX/i.test(v);
         week.plan[s.id] = week.plan[s.id] || {};
         const label = norm(v.replace(/CANX|CNX/ig, ''));
         week.plan[s.id][d] = { on: !!v && !canx, label: label || (week.plan[s.id][d] && week.plan[s.id][d].label) || '' };
       }
     }
+    // bảng đếm cuối file: dòng OFF / NP rồi TW1, GRP3, FD1/S… (mỗi ngày: cột trái = số / ghi chú gõ tay, cột phải = công thức đếm)
+    let sumRow = -1;
+    for (let r = firstStaff + 1; r < aoa.length && sumRow < 0; r++) {
+      const A = norm(cellStr(r, keyCol)).toUpperCase(); if (A !== 'OFF' && A !== 'NP') continue;
+      for (let k = 1; k <= 8; k++) if (/^(TW\d|GRP\d|LJ\d|RS|BX|AK\d|FD\d)/.test(norm(cellStr(r + k, keyCol)).toUpperCase().replace(/\s/g, ''))) { sumRow = r; break; }
+    }
     // nhân viên
-    const end = ticketRow > 0 ? ticketRow : aoa.length;
+    const end = Math.min(ticketRow > 0 ? ticketRow : aoa.length, sumRow > 0 ? sumRow : aoa.length);
     const seen = {};
     const observed = {};
     for (let r = firstStaff; r < end; r++) {
-      const raw = cellStr(r, 0); if (!norm(raw)) continue;
+      const raw = cellStr(r, keyCol); if (!norm(raw)) continue;
+      if (SLOT_KEY.test(norm(raw)) || /^(OFF|NP|LE|SUP|GRP\d|G1 FULL)$/i.test(norm(raw))) continue;
       const nm = splitName(raw);
       let sf = cfg.staff.find(s => key(s.name) === key(nm.name));
-      const g = fills ? FILL_GROUP[String(fills(r, 0) || '').toUpperCase().slice(-6)] : null;
+      // gõ thiếu dấu giữa các tuần (vd "NGOC THUÝ" / "NGỌC THUÝ"): so khớp không dấu nếu chỉ có đúng 1 người
+      if (!sf) { const k0 = noDia(nm.name); const hit = cfg.staff.filter(s => noDia(s.name) === k0); if (hit.length === 1) sf = hit[0]; }
+      const g = fills ? (FILL_GROUP[String(fills(r, keyCol) || '').toUpperCase().slice(-6)] || FILL_GROUP[String(fills(r, 0) || '').toUpperCase().slice(-6)]) : null;
       if (!sf) { sf = newStaff(nm.name, { tags: nm.tags, noNight: nm.noNight, group: g || 3 }); cfg.staff.push(sf); }
-      else if (g) sf.group = g;
+      else { if (g) sf.group = g; if (nm.tags.length) sf.tags = [...new Set([...(sf.tags || []), ...nm.tags])]; }
+      const flag = norm(cellStr(r, 0)); if (keyCol > 0 && flag && typeof cellStr(r, 0) !== 'number') sf.flag = flag;
       seen[sf.id] = true;
-      const prevN = cellStr(r, 17); if (typeof prevN === 'number') week.prevNights[sf.id] = prevN;
+      const prevN = keyCol === 0 ? cellStr(r, 17) : null; if (typeof prevN === 'number') week.prevNights[sf.id] = prevN;
       const roles = new Set(sf.roles || []);
       const handle = (text, target) => {
         const pc = parseCell(text, cfg, cm);
@@ -1221,11 +1279,12 @@ const Core = (() => {
         for (const it of pc.items) { if (it.role) roles.add(it.role); target.items.push({ slot: it.slot, role: it.role, ...(it.tag ? { tag: it.tag } : {}) }); }
         if (pc.note.length) target.note = norm((target.note ? target.note + '; ' : '') + pc.note.join('; '));
       };
-      const carry = { status: '', note: '', items: [] }; handle(cellStr(r, 1), carry);
+      const carry = { status: '', note: '', items: [] };
+      if (keyCol === 0) handle(cellStr(r, 1), carry); else for (let cc = keyCol + 1; cc < dateCol; cc++) handle(cellStr(r, cc), carry);
       if (carry.status || carry.items.length || carry.note) week.carry[sf.id] = carry;
       for (let d = 0; d < 7; d++) {
         const c = { status: '', note: '', items: [] };
-        handle(cellStr(r, 2 + 2 * d), c); handle(cellStr(r, 3 + 2 * d), c);
+        handle(cellStr(r, dc(d)), c); handle(cellStr(r, dc(d) + 1), c);
         if (c.status === 'TS' || c.status || c.items.length || c.note) { week.cells[sf.id] = week.cells[sf.id] || {}; week.cells[sf.id][d] = c; }
         for (const it of c.items) { const k = it.slot + '|' + d; observed[k] = observed[k] || {}; const rr = it.role || 'A'; observed[k][rr] = (observed[k][rr] || 0) + 1; }
       }
@@ -1235,7 +1294,7 @@ const Core = (() => {
     if (ticketRow > 0) {
       let kind = 'ticket';
       for (let r = ticketRow; r < aoa.length; r++) {
-        const a = norm(cellStr(r, 0)); const A = a.toUpperCase();
+        const a = norm(cellStr(r, keyCol)); const A = a.toUpperCase();
         if (!a) continue;
         if (A === 'OFF' || A === 'NP' || A === 'LE') break;
         if (A === 'TICKET') { kind = 'ticket'; continue; }
@@ -1245,7 +1304,7 @@ const Core = (() => {
         let sf = cfg.staff.find(s => key(s.name) === key(nm.name) && s.kind === (kind === 'maternity' ? 'flight' : kind));
         if (!sf) { sf = newStaff(nm.name, { kind: kind === 'maternity' ? 'flight' : kind, group: kind === 'maternity' ? 3 : 7, auto: kind !== 'maternity', active: kind !== 'maternity' }); cfg.staff.push(sf); }
         for (let d = 0; d < 7; d++) {
-          const t = [cellStr(r, 2 + 2 * d), cellStr(r, 3 + 2 * d)].map(norm).filter(Boolean).join(' / ');
+          const t = [cellStr(r, dc(d)), cellStr(r, dc(d) + 1)].map(norm).filter(Boolean).join(' / ');
           if (!t) continue;
           const c = { status: '', note: '', items: [] };
           const code = cm[key(t)];
@@ -1254,7 +1313,59 @@ const Core = (() => {
         }
       }
     }
-    return { cfg, week, observed };
+    const counts = readCounts(sumRow);
+    return { cfg, week, observed, counts };
+
+    function readCounts(row0) {
+      const out = { found: row0 >= 0, rows: 0, demand: {}, nDemand: 0, canx: [], notes: [], check: [] };
+      if (row0 < 0) return out;
+      const LBL = { GRP1: 'G1', GRP2: 'G2', GRP3: 'G3', MH1: 'MH', BX: 'BX1' };
+      const nItems = Object.values(observed).reduce((a, o) => a + Object.values(o).reduce((x, y) => x + y, 0), 0);
+      const filled = nItems >= 40; // file đã chia: lấy số người thực tế làm định mức
+      const per = {};
+      for (let r = row0; r < aoa.length; r++) {
+        const L = norm(cellStr(r, keyCol)).toUpperCase().replace(/\s/g, ''); if (!L || /^(OFF|NP|LE|SUP|G1FULL)$/.test(L)) continue;
+        let [sl, role] = L.split('/'); sl = LBL[sl] || sl; role = role || '';
+        if (!cfg.slots.find(x => x.id === sl) || (role && !ROLE_IDS.includes(role))) continue;
+        out.rows++;
+        for (let d = 0; d < 7; d++) {
+          const tv = cellStr(r, dc(d)), cv = cellStr(r, dc(d) + 1);
+          per[sl] = per[sl] || {}; const o = per[sl][d] = per[sl][d] || { rc: {} };
+          if (typeof tv === 'number') {
+            if (!role && tv > 0 && tv <= 40) o.T = tv;
+            else if (tv >= 100 && tv < 2400) o.note = (o.note ? o.note + '; ' : '') + 'giờ ghi ở bảng đếm ' + fmtTime(tv);
+          } else if (tv !== '' && tv != null) {
+            const t = norm(String(tv));
+            if (/CANX|CNX/i.test(t)) { if (role) o.rc[role] = true; else o.canx = true; }
+            else {
+              const m = !role && t.match(/^(\d{1,2})\s*\/\s*(.*)$/); // "4/ 1 HO TRO BRD" = cần 4 người
+              if (m) { o.T = +m[1]; if (m[2]) o.note = (o.note ? o.note + '; ' : '') + m[2]; }
+              else o.note = (o.note ? o.note + '; ' : '') + (role ? '/' + role + ': ' : '') + t;
+            }
+          }
+          if (typeof cv === 'number' && !role) o.cnt = cv;
+        }
+      }
+      const AMBIG = { BX1: 1, MH: 1, Z2: 1 }; // công thức đếm trong file gộp nhiều chuyến hoặc phân biệt dấu cách
+      for (const sl in per) for (let d = 0; d < 7; d++) {
+        const o = per[sl][d]; if (!o) continue;
+        week.plan[sl] = week.plan[sl] || {};
+        const p = week.plan[sl][d] || { on: false, label: '' };
+        if (o.note) { p.note = o.note; out.notes.push(sl + ' ' + DAYS[d] + ': ' + o.note); }
+        if (o.canx) { if (p.on) out.canx.push(sl + ' ' + DAYS[d]); p.on = false; }
+        week.plan[sl][d] = p;
+        if (!p.on) continue;
+        const ob = observed[sl + '|' + d];
+        const base = clone(planOf(cfg, week, sl, d).demand || {});
+        let dem = null;
+        if (filled && ob) dem = clone(ob);
+        if (o.T) { const src = dem || base; const sp = ROLE_IDS.reduce((a, r) => a + (+src[r] || 0), 0); dem = Object.assign({}, src, { A: Math.max(0, o.T - sp) }); }
+        for (const r in o.rc) { dem = dem || base; delete dem[r]; }
+        if (dem) { for (const k in dem) if (!(+dem[k] > 0)) delete dem[k]; p.demand = dem; (out.demand[sl] = out.demand[sl] || {})[d] = dem; out.nDemand++; }
+        if (filled && o.cnt != null && !AMBIG[sl]) { const have = ob ? Object.values(ob).reduce((a, b) => a + b, 0) : 0; if (have !== o.cnt) out.check.push(sl + ' ' + DAYS[d] + ': file đếm ' + o.cnt + ', máy đọc ' + have); }
+      }
+      return out;
+    }
   }
 
   /* ---------- xuất Excel (mảng 2 chiều) ---------- */
@@ -1650,7 +1761,7 @@ const XW = (() => {
 /* Phân Ca Sân Bay · Bản quyền © 2026 ThienNV · thiennv@vnpt-technology.vn · 0888.99.33.00 */
 const COPYRIGHT = '© 2026 ThienNV · thiennv@vnpt-technology.vn · 0888.99.33.00';
 const C = Core, DAYS = C.DAYS;
-const APP_VERSION = '20261009164224';
+const APP_VERSION = '20261009214742';
 const STANDALONE = !(window.claude && typeof window.claude.use === 'function');
 const $ = s => document.querySelector(s);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -2096,7 +2207,7 @@ function applyLockView() {
 function recompute() {
   applyLockView();
   if (!S.cfg || !S.week) { S.val = null; S.st = null; return; }
-  S.val = C.validate(S.cfg, S.week);
+  S.val = C.validate(cfgX(), S.week);
   S.st = C.stats(S.cfg, S.week);
 }
 function snapshot() { return JSON.stringify(S.week); }
@@ -2147,7 +2258,7 @@ async function loadData() {
   const todayMon = C.mondayOf(C.isoDate(new Date()));
   if (S.weeks.includes(todayMon)) start = todayMon; else if (S.weeks.length) start = S.weeks[S.weeks.length - 1];
   if (start) await openWeek(start, true);
-  S.ready = true; recompute(); render(); setSave(); Store.watch(); watchVersion();
+  S.ready = true; recompute(); render(); setSave(); Store.watch(); watchVersion(); skillsInit();
   if (upg.length && !S.ro && S.cfg.staff.length) {
     if (!S.cfgLive) Store.save('cfg');
     modal('Đã cập nhật cách tính ca', '<p style="margin-top:0">Trang vừa áp dụng quy tắc mới:</p><ul>' + upg.map(x => '<li>' + esc(x) + '</li>').join('') + '</ul><p class="help">Lịch đã xếp trước đây có thể hiện cảnh báo trùng giờ. Bấm <b>Tự động chia → Chỉ lấp chỗ trống</b> để máy tự gỡ chỗ trùng và xếp lại. Sửa giờ ở Cài đặt → Slot chuyến bay (cột Lên ca, Xuống ca, Làm chung).</p>', [{ label: 'Đã hiểu', cls: 'pri' }]);
@@ -2180,7 +2291,7 @@ async function openWeek(start, silent) {
   S.week = w; S.undo = []; S.redo = []; S.sel = null; S.covSel = null; S.drawer = null;
   for (const s of S.cfg.slots) if (!w.plan[s.id]) { const nw = C.newWeek(S.cfg, start, null); w.plan[s.id] = nw.plan[s.id]; }
   recompute();
-  if (!silent) { render(); Store.watch(); }
+  if (!silent) { render(); Store.watch(); if (typeof skillsRefresh === 'function' && !S.ro) skillsRefresh().then(() => { recompute(); render(); }).catch(() => {}); }
   return true;
 }
 
@@ -2221,7 +2332,7 @@ function renderInner() {
   const m = $('#main');
   if (!S.ready) { m.innerHTML = '<div class="empty"><h2>Đang tải dữ liệu…</h2><p>Đang kết nối tới kho dữ liệu của trang.</p></div>'; return; }
   if (!S.week) { m.innerHTML = emptyView(); return; }
-  const v = { roster: viewRoster, leave: viewLeave, cov: viewCov, plan: viewPlan, stats: viewStats, ts: viewTs, cfg: viewCfg }[S.tab];
+  const v = { roster: viewRoster, leave: viewLeave, cov: viewCov, plan: viewPlan, stats: viewStats, ts: viewTs, cfg: viewCfg, skills: viewSkills }[S.tab];
   const sx = document.querySelector('.scroll'); const keep = sx ? [sx.scrollLeft, sx.scrollTop] : null;
   m.innerHTML = staleBar() + lockBanner() + v();
   const nx = document.querySelector('.scroll'); if (nx && keep && S._keepScroll !== false) { nx.scrollLeft = keep[0]; nx.scrollTop = keep[1]; }
@@ -2477,6 +2588,7 @@ function viewPlan() {
       const dm = demandText(p.demand);
       h += '<td class="fp' + (p.on ? '' : ' offd') + '"><div class="row"><button class="tog' + (p.on ? '' : ' offb') + '" data-act="plan-tog" data-slot="' + s.id + '" data-d="' + d + '">' + (p.on ? 'BAY' : 'CANX') + '</button>' +
         '<input class="inp" data-plan-label="' + s.id + '|' + d + '" value="' + esc(p.label) + '" aria-label="Chuyến ' + s.id + ' ' + DAYS[d] + '"></div>' +
+        (raw && raw.note ? '<span class="dm pnote" title="Ghi chú từ bảng đếm của file Excel">📝 ' + esc(raw.note) + '</span>' : '') +
         '<span class="dm' + (ovr ? ' ovr' : '') + '" data-act="plan-dem" data-slot="' + s.id + '" data-d="' + d + '" title="Sửa định mức ngày này">định mức: ' + esc(dm || '0') + (ovr ? ' (riêng)' : '') + '</span>' +
         (p.on && (s.covers || s.start) ? '<span class="dm">ca ' + C.shiftText(S.cfg, w, s, d) + '</span>' : '') +
         (p.on && !s.covers ? '<span class="dm dly' + (raw && +raw.delay ? ' on' : '') + '" data-act="plan-delay" data-slot="' + s.id + '" data-d="' + d + '">' + (raw && +raw.delay ? '⏱ delay ' + raw.delay + ' phút' : '⏱ báo delay') + '</span>' : '') + '</td>';
@@ -2716,7 +2828,7 @@ function drawerCell() {
     }).join('') + '</div>';
     h += '</div>';
     // thêm chuyến
-    const ctx = C.makeCtx(S.cfg, w);
+    const ctx = C.makeCtx(cfgX(), w);
     const cov = S.val.cov;
     const rows = S.cfg.slots.filter(s => C.planOf(S.cfg, w, s.id, d).on && !c.items.some(i => i.slot === s.id)).map(s => {
       const role = pickRole(sf, s.id, d);
@@ -2743,7 +2855,7 @@ function pickRole(sf, slotId, d) {
 function drawerCov() {
   const { slot, d } = S.covSel; const s = slotById(slot); const w = S.week; if (!s) return '';
   const x = S.val.cov[slot][d];
-  const ctx = C.makeCtx(S.cfg, w);
+  const ctx = C.makeCtx(cfgX(), w);
   let h = '<aside class="drawer" role="dialog" aria-label="Quân số chuyến"><header><div><h3>' + esc(s.id + ' · ' + (x.label || s.flight)) + '</h3><div class="sub">' + C.dayLabel(w.start, d) + ' · ' + (x.on ? x.haveT + '/' + x.needT + ' người' + (x.short ? ', thiếu ' + x.short : '') : 'Chuyến không bay') + '</div></div><button class="x" data-act="close" aria-label="Đóng">×</button></header><div class="body">';
   h += '<div class="sec"><h4>Định mức</h4><div class="muted">' + esc(demandText(x.need) || 'Chưa đặt') + ' · ' + ['S', 'C', 'G', 'GC', 'SE'].filter(r => +x.need[r]).map(r => '/' + r + ': ' + (x.have[r] || 0) + '/' + x.need[r]).join(' · ') + '</div></div>';
   h += '<div class="sec"><h4>Đang làm (' + x.people.length + ')</h4><div class="list">' + (x.people.length ? x.people.map(p => {
@@ -2765,7 +2877,8 @@ function drawerCov() {
 }
 function candRow(c, d, role) {
   const cell = C.cellOf(S.week, c.sf.id, d);
-  return '<div class="li clickable' + (c.why.length ? ' dis' : '') + '" data-act="cov-add" data-sid="' + c.sf.id + '" data-role="' + role + '"><div class="grow"><b>' + esc(c.sf.name) + '</b> <span class="muted">' + (c.sf.roles || []).map(r => '/' + r).join(' ') + '</span><div class="meta">' + c.p.load + ' slot · ' + c.p.nights + ' đêm · ' + fmtN(c.p.nightHours) + 'h đêm' + (cell && (cell.items || []).length ? ' · hôm nay: ' + cell.items.map(i => i.slot).join(', ') : '') + (cell && cell.status ? ' · ' + esc(cell.status) : '') + '</div>' + (c.why.length ? '<div class="why">' + esc(c.why.join(' · ')) + '</div>' : '') + '</div><span class="btn sm">+</span></div>';
+  const air = S.covSel && slotById(S.covSel.slot) ? slotById(S.covSel.slot).airline : '';
+  return '<div class="li clickable' + (c.why.length ? ' dis' : '') + '" data-act="cov-add" data-sid="' + c.sf.id + '" data-role="' + role + '"><div class="grow">' + skillBadge(c.sf.id, air) + ' <b>' + esc(c.sf.name) + '</b> <span class="muted">' + (c.sf.roles || []).map(r => '/' + r).join(' ') + '</span><div class="meta">' + c.p.load + ' slot · ' + c.p.nights + ' đêm · ' + fmtN(c.p.nightHours) + 'h đêm' + (cell && (cell.items || []).length ? ' · hôm nay: ' + cell.items.map(i => i.slot).join(', ') : '') + (cell && cell.status ? ' · ' + esc(cell.status) : '') + '</div>' + (c.why.length ? '<div class="why">' + esc(c.why.join(' · ')) + '</div>' : '') + '</div><span class="btn sm">+</span></div>';
 }
 
 /* ================= HỘP THOẠI & THÔNG BÁO ================= */
@@ -2850,7 +2963,8 @@ async function historyModel() {
   return C.learnModel(S.cfg, weeks);
 }
 async function runAuto(mode, autoOff, learn) {
-  const cfg = Object.assign({}, S.cfg, { rules: Object.assign({}, S.cfg.rules, { autoOff }) });
+  await skillsRefresh();
+  const cfg = Object.assign({}, cfgX(), { rules: Object.assign({}, S.cfg.rules, { autoOff }) });
   const L = learn === false ? null : await historyModel().catch(() => null);
   // sao lưu trước khi xếp lại toàn bộ (khôi phục được ở Cài đặt → Nhập / xuất → Bản sao lưu tự động)
   if (mode === 'rebuild' && typeof Backup !== 'undefined' && S.week && Object.values(S.week.cells || {}).some(c => Object.values(c).some(x => x && (x.items || []).length))) { try { await Backup.create('Trước khi xếp lại toàn bộ'); } catch (e) {} }
@@ -2919,7 +3033,8 @@ async function importXlsx() {
   if (!window.XLSX) { toast('Chưa tải được thư viện Excel. Kiểm tra kết nối mạng rồi thử lại.'); return; }
   let wb;
   try { wb = XLSX.read(f.data, { type: 'array', cellDates: true, cellStyles: true }); } catch (e) { toast('Không đọc được file: ' + e.message); return; }
-  const cand = wb.SheetNames.filter(n => { const ws = wb.Sheets[n]; const c = ws && ws['C1']; return c && (c.t === 'd' || (c.t === 'n' && c.v > 40000)); });
+  // sheet lịch: có ô ngày ở 3 dòng đầu (mẫu cũ C1, mẫu mới E1/F1)
+  const cand = wb.SheetNames.filter(n => { const ws = wb.Sheets[n]; if (!ws) return false; for (let r = 0; r < 3; r++) for (let c = 0; c < 10; c++) { const x = ws[XLSX.utils.encode_cell({ r, c })]; if (x && (x.t === 'd' || (x.t === 'n' && x.v > 40000 && x.v < 80000))) return true; } return false; });
   const pick = cand.length ? cand : wb.SheetNames;
   const go = name => {
     const ws = wb.Sheets[name];
@@ -2930,17 +3045,20 @@ async function importXlsx() {
     const fills = (r, c) => { const cell = ws[XLSX.utils.encode_cell({ r, c })]; const s = cell && cell.s; return s && s.fgColor && s.fgColor.rgb ? s.fgColor.rgb : null; };
     let res;
     try { res = C.parseRosterAOA(all, fills, liveCfg()); } catch (e) { toast(e.message); return; }
+    stashSkillTags(res.cfg);
     const exists = S.weeks.includes(res.week.start);
     const newStaff = res.cfg.staff.length - S.cfg.staff.length;
     const nItems = Object.values(res.week.cells).reduce((a, x) => a + Object.values(x).reduce((b, c) => b + (c.items || []).length, 0), 0);
     const nLeave = Object.values(res.week.cells).reduce((a, x) => a + Object.values(x).filter(c => c.status).length, 0);
     modal('Nhập file ' + f.name, '<p style="margin:0">Sheet <b>' + esc(name) + '</b> · tuần <b>' + weekName(res.week.start) + '</b>: ' + res.cfg.staff.length + ' nhân viên' + (newStaff > 0 ? ' (' + newStaff + ' người mới)' : '') + ', ' + nItems + ' lượt phân công, ' + nLeave + ' ô trạng thái (OFF, NP…).</p>' +
+      countsHtml(res.counts) +
       '<label class="opt"><input type="radio" name="im" value="plan"' + (exists ? ' checked' : '') + '><div><b>Chỉ lịch bay</b><span>Cập nhật chuyến bay, giờ và CANX theo file. Giữ nguyên phân công và trạng thái đang có.</span></div></label>' +
       '<label class="opt"><input type="radio" name="im" value="leave"><div><b>Chỉ OFF / NP / trạng thái</b><span>Lấy phần trạng thái (OFF, NP, ốm, họp…) của file. Giữ nguyên phân công chuyến.</span></div></label>' +
       '<label class="opt"><input type="radio" name="im" value="plan+leave"><div><b>Lịch bay + OFF/NP (để tự chia)</b><span>Dùng khi file mới chỉ có lịch bay và order nghỉ, chưa chia chuyến.</span></div></label>' +
       '<label class="opt"><input type="radio" name="im" value="all"' + (exists ? '' : ' checked') + '><div><b>Toàn bộ</b><span>' + (exists ? 'Ghi đè cả tuần bằng nội dung file.' : 'Tạo tuần mới từ file.') + '</span></div></label>',
       [{ label: 'Huỷ' }, { label: 'Nhập', cls: 'pri', fn: async host => {
         const mode = host.querySelector('input[name=im]:checked').value;
+        const useDem = host.querySelector('#imDem'); if (useDem && !useDem.checked) for (const sl in res.counts.demand) for (const d in res.counts.demand[sl]) if (res.week.plan[sl] && res.week.plan[sl][d]) delete res.week.plan[sl][d].demand;
         S.cfgLive = null; S.cfg = res.cfg; migrateCfg(S.cfg); Store.save('cfg');
         const start = res.week.start;
         if (mode === 'all') {
@@ -2967,6 +3085,17 @@ async function importXlsx() {
   if (pick.length === 1) go(pick[0]);
   else modal('Chọn sheet', '<select class="sel" id="shSel" style="width:100%">' + pick.map(n => '<option>' + esc(n) + '</option>').join('') + '</select>', [{ label: 'Huỷ' }, { label: 'Tiếp tục', cls: 'pri', fn: host => { const n = host.querySelector('#shSel').value; setTimeout(() => go(n), 0); } }]);
 }
+// bảng đếm cuối file Excel: định mức từng chuyến, CANX, ghi chú, đối chiếu số máy đọc được
+function countsHtml(k) {
+  if (!k || !k.found) return '';
+  const li = (a, n) => a.slice(0, n).map(x => '<li>' + esc(x) + '</li>').join('') + (a.length > n ? '<li class="muted">… và ' + (a.length - n) + ' mục khác</li>' : '');
+  let h = '<div class="cntbox"><b>Bảng đếm cuối file</b> (' + k.rows + ' dòng chuyến / vị trí)';
+  if (k.nDemand) h += '<label class="chk" data-tip="Đặt số người cần cho từng chuyến, từng ngày đúng như file (số gõ tay như GRP3 = 8, hoặc số người thực tế đã chia). Tuần sau tạo mới sẽ kế thừa định mức này. Bỏ tick để giữ định mức mặc định trong Cài đặt."><input type="checkbox" id="imDem" checked> Lấy định mức theo file cho ' + k.nDemand + ' lượt chuyến-ngày</label>';
+  if (k.canx.length) h += '<div>Huỷ theo bảng đếm (CANX): ' + esc(k.canx.join(', ')) + '</div>';
+  if (k.notes.length) h += '<details><summary>' + k.notes.length + ' ghi chú (hiện trong tab Lịch bay)</summary><ul>' + li(k.notes, 12) + '</ul></details>';
+  if (k.check.length) h += '<details><summary class="warnt">⚠ ' + k.check.length + ' chỗ số đếm trong file khác số máy đọc được, nên mở xem lại</summary><ul>' + li(k.check, 12) + '</ul><p class="muted" style="margin:4px 0 0">Thường do gõ cách chữ (vd "R S", "E K") hoặc ghi chuyến ở cột trạng thái. Sau khi nhập, kiểm tra ô đó ở tab Lịch tuần.</p></details>';
+  return h + '</div>';
+}
 async function importJson() {
   let f; try { f = await readFile($('#fileJson'), true); } catch (e) { return; } finally { $('#fileJson').value = ''; }
   let obj; try { obj = JSON.parse(f.data); } catch (e) { toast('File JSON không hợp lệ'); return; }
@@ -2977,7 +3106,7 @@ async function importJson() {
       S.cfgLive = null; S.cfg = obj.cfg; migrateCfg(S.cfg); await Store.flushNow('cfg');
       for (const w of ws) { S.week = obj.weeks[w]; await Store.flush('week', w); }
       S.weeks = [...new Set([...S.weeks, ...ws])].sort();
-      await openWeek(S.weeks[S.weeks.length - 1]); S.ready = true; render(); toast('Đã khôi phục');
+      await openWeek(S.weeks[S.weeks.length - 1]); S.ready = true; render(); skillsInit(); toast('Đã khôi phục');
     } }]);
 }
 Store.flushNow = function (kind) { clearTimeout(this.timers.cfg); return this.flush(kind); };
@@ -3038,7 +3167,7 @@ document.addEventListener('click', async e => {
       } }]); break;
     case 'plan-tog': {
       const { slot, d } = t.dataset;
-      mutateWeek(w => { w.plan[slot] = w.plan[slot] || {}; const p = w.plan[slot][d] || C.planOf(S.cfg, w, slot, +d); w.plan[slot][d] = Object.assign({}, p, { on: !p.on }); }); break;
+      mutateWeek(w => { w.plan[slot] = w.plan[slot] || {}; const raw = w.plan[slot][d], p = C.planOf(S.cfg, w, slot, +d); w.plan[slot][d] = raw ? Object.assign({}, raw, { on: !p.on }) : { on: !p.on, label: p.label }; }); break;
     }
     case 'plan-dem': {
       const { slot, d } = t.dataset; const s = slotById(slot); const p = C.planOf(S.cfg, w, slot, +d);
@@ -3121,7 +3250,7 @@ document.addEventListener('change', e => {
   if (t.dataset.itrole != null) { const { sid, d } = S.sel; mutateWeek(w => { C.cellOf(w, sid, d).items[+t.dataset.itrole].role = t.value; }); return; }
   if (t.dataset.planLabel) {
     const [slot, d] = t.dataset.planLabel.split('|');
-    mutateWeek(w => { w.plan[slot] = w.plan[slot] || {}; w.plan[slot][d] = Object.assign({}, C.planOf(S.cfg, w, slot, +d), { label: C.norm(t.value) }); }); return;
+    mutateWeek(w => { w.plan[slot] = w.plan[slot] || {}; const raw = w.plan[slot][d], p = C.planOf(S.cfg, w, slot, +d); w.plan[slot][d] = raw ? Object.assign({}, raw, { label: C.norm(t.value) }) : { on: p.on, label: C.norm(t.value) }; }); return;
   }
   if (t.dataset.ts) {
     const [sid, d, f] = t.dataset.ts.split('|'); const v = t.value.trim() === '' ? '' : (parseFloat(t.value.replace(',', '.')) || 0);
@@ -3861,6 +3990,7 @@ const TIPS = {
   'tab:plan': 'Lịch bay riêng của tuần: bật/tắt chuyến (CANX), sửa giờ, định mức riêng',
   'tab:stats': 'Mức độ công bằng, danh sách cảnh báo và chi tiết từng người',
   'tab:ts': 'Chấm công: nhập phút OVER / BÙ, giờ công tự tính',
+  'tab:skills': 'Bảng năng lực nhân viên theo từng hãng (chỉ người làm lịch xem): tự tính từ các tuần đã chia, chỉnh tay được, khoá hãng cần chứng nhận',
   'tab:cfg': 'Nhân viên, slot, mã trạng thái, quy tắc, nhập/xuất, quyền truy cập',
   // Lịch tuần
   'id:fq': 'Gõ tên để chỉ hiện người đó',
@@ -4000,7 +4130,7 @@ const TipUI = {
 };
 TipUI.init();
 
-const HELP_DOCS = {"staff": "<p>Xem lịch của mình chỉ cần 3 bước: mở link, đăng nhập, gõ tên vào ô tìm kiếm. Muốn lịch tự gửi tới, bấm 🔔 Nhận lịch (mục 4).<\/p>\n<h2 id=\"hs1\">1. Vào trang lần đầu<\/h2>\n<ol><li>Mở link trang lịch mà người quản lý gửi qua Zalo. Nên lưu lại (ghim tin nhắn hoặc thêm vào màn hình chính điện thoại).<\/li><li>Đăng nhập một trong hai cách:<ul><li>Bấm nút <b>Google<\/b> và chọn tài khoản Gmail.<\/li><li>Hoặc bấm <b>Tạo tài khoản<\/b> bằng email, mở thư xác minh (xem cả mục Thư rác), bấm link trong thư, quay lại bấm <b>Tôi đã xác minh<\/b>.<\/li><\/ul><\/li><li>Nếu trang báo <b>Chưa được cấp quyền<\/b>: gửi email bạn vừa dùng cho người quản lý. Khi được thêm, tải lại trang là vào được.<\/li><\/ol>\n<p>Lần sau mở link là vào thẳng, không cần đăng nhập lại.<\/p>\n<h2 id=\"hs2\">2. Xem lịch của mình<\/h2>\n<ol><li>Trang mở sẵn tab <b>Lịch tuần<\/b>.<\/li><li>Kiểm tra tuần ở thanh trên cùng (ví dụ <i>05/10 – 11/10/2026<\/i>). Bấm <b>‹<\/b> / <b>›<\/b> để sang tuần trước, tuần sau, hoặc bấm vào ô tuần để chọn.<\/li><li>Gõ tên mình vào ô <b>Tìm nhân viên<\/b>. Bảng chỉ còn dòng của bạn.<\/li><li>Đọc từ trái sang phải, thứ Hai đến Chủ nhật. Mỗi ô là chuyến được xếp hoặc trạng thái nghỉ của ngày đó. Cột <i>CN trước<\/i> là Chủ nhật tuần trước, để biết giờ nghỉ.<\/li><li>Trên máy tính, đưa chuột lên một chuyến để xem số hiệu và giờ bay.<\/li><\/ol>\n<p>Lịch tự cập nhật khi người làm lịch sửa, không cần tải lại trang. Muốn lưu về máy, bấm <b>Xuất Excel<\/b>.<\/p>\n<h2 id=\"hs3\">3. Ký hiệu trong ô<\/h2>\n<table><thead><tr><th>Thấy trong ô<\/th><th>Nghĩa là<\/th><\/tr><\/thead><tbody><tr><td>Chip nền sáng, ví dụ <code>AK1<\/code><\/td><td>Chuyến ban ngày<\/td><\/tr><tr><td>Chip nền xanh đậm, ví dụ <code>LJ3<\/code><\/td><td>Chuyến ban đêm<\/td><\/tr><tr><td>Chữ nghiêng sau chuyến, ví dụ <code>AK1/S<\/code><\/td><td>Vị trí bạn đảm nhận (S = Supervisor…)<\/td><\/tr><tr><td>🔒<\/td><td>Người làm lịch đã chốt ô này<\/td><\/tr><tr><td><b>OFF<\/b> (nền xám)<\/td><td>Ngày nghỉ. <i>OFF1/2<\/i> là nghỉ nửa ngày<\/td><\/tr><tr><td><b>NP<\/b>, ốm (nền tím)<\/td><td>Nghỉ phép, nghỉ ốm<\/td><\/tr><tr><td><b>SBY<\/b> (nền xanh dương)<\/td><td>Trực dự phòng<\/td><\/tr><tr><td>Ô viền đỏ<\/td><td>Lịch đang có vấn đề, người làm lịch sẽ sửa<\/td><\/tr><tr><td>Ô trống<\/td><td>Chưa xếp việc<\/td><\/tr><\/tbody><\/table>\n<p>Dải vàng <b>Tuần đã chốt<\/b> ở đầu trang nghĩa là lịch tuần đó là bản cuối cùng.<\/p>\n<h2 id=\"hs4\">4. Nhận lịch qua email hoặc Telegram<\/h2>\n<p>Bạn có thể nhận lịch của mình tự động, không cần mở trang.<\/p>\n<ol><li>Bấm <b>🔔 Nhận lịch<\/b> trên thanh trên cùng.<\/li><li>Chọn <b>tên của bạn<\/b> trong danh sách.<\/li><li>Chọn cách nhận:<ul><li><b>Email<\/b>: đánh dấu và kiểm tra địa chỉ email.<\/li><li><b>Telegram<\/b>: bấm <b>Kết nối Telegram<\/b>, Telegram mở ra, bấm <b>Start<\/b>. Khi bot nhắn \"✅ Đã kết nối\" là xong (có thể mất vài giờ, khi người làm lịch mở trang).<\/li><\/ul><\/li><li>Chọn nhận khi <b>Có lịch tuần mới<\/b> và/hoặc khi <b>Lịch của tôi bị thay đổi<\/b>, bấm <b>Lưu<\/b>.<\/li><\/ol>\n<p>Tin nhắn ghi lịch 7 ngày của bạn; ngày bị đổi có dấu \"◀ mới\". Muốn ngừng: <b>🔔 Nhận lịch → Tắt nhận tin<\/b>. Lịch cũng được gửi trong nhóm Zalo của tổ như trước.<\/p>\n<h2 id=\"hs5\">5. Các tab và câu hỏi thường gặp<\/h2>\n<table><thead><tr><th>Tab<\/th><th>Xem gì<\/th><\/tr><\/thead><tbody><tr><td><b>Lịch tuần<\/b><\/td><td>Lịch của mọi người trong tuần<\/td><\/tr><tr><td><b>Quân số<\/b><\/td><td>Mỗi chuyến mỗi ngày có những ai làm<\/td><\/tr><tr><td><b>Thống kê<\/b><\/td><td>Số ca đêm, số ngày làm, số OFF của từng người<\/td><\/tr><\/tbody><\/table>\n<ul><li><b>Muốn đổi ca hoặc xin nghỉ?<\/b> Báo người làm lịch như trước. Trang chỉ để xem, bạn không sửa được.<\/li><li><b>Không thấy tên mình?<\/b> Kiểm tra đúng tuần chưa, gõ ngắn hơn (ví dụ chỉ gõ tên). Vẫn không có thì báo người làm lịch.<\/li><li><b>Tuần sau chưa có?<\/b> Người làm lịch chưa tạo. Quay lại xem sau.<\/li><li><b>Dùng máy khác hoặc máy chung?<\/b> Bấm <b>Đăng xuất<\/b> ở góc phải trên cùng khi xem xong.<\/li><li><b>Cần xem lại hướng dẫn này?<\/b> Bấm <b>📖 Hướng dẫn<\/b> trên thanh trên cùng. Trong đó có nút tải về file Word hoặc in / lưu PDF.<\/li><\/ul>\n<p>Bản quyền © 2026 ThienNV · thiennv@vnpt-technology.vn · 0888.99.33.00<\/p>", "editor": "<h2 id=\"hs1\">Giới thiệu<\/h2>\n<p>Phân Ca Sân Bay là trang web chia lịch và chấm công cho nhân viên mặt đất. Trang tự xếp người vào chuyến theo luật nghỉ ngơi, đếm quân số từng chuyến và xuất ra Excel có màu. Dữ liệu lưu trên Firebase nên mọi người cùng thấy một bản duy nhất, cập nhật ngay khi có người sửa.<\/p>\n<p>Có hai vai trò:<\/p>\n<table><thead><tr><th>Vai trò<\/th><th>Làm được gì<\/th><\/tr><\/thead><tbody><tr><td><b>Người làm lịch<\/b> (editor)<\/td><td>Tạo tuần mới, sửa lịch bay, nhập OFF/NP, tự động chia, sửa tay, nhập dữ liệu từ ảnh, chốt tuần, chỉnh cài đặt, xuất Excel<\/td><\/tr><tr><td><b>Người xem<\/b> (viewer)<\/td><td>Xem Lịch tuần, Quân số, Thống kê; tìm tên mình; xuất Excel. Không sửa được gì<\/td><\/tr><\/tbody><\/table>\n<p>Chủ dự án (email ghi trong dòng <code>OWNERS<\/code> của luật Firebase) luôn là người làm lịch và là người cấp quyền cho người khác.<\/p>\n<p><b>Mẹo:<\/b> trên máy tính, đưa chuột lên bất kỳ nút nào để xem hướng dẫn nhanh của nút đó.<\/p>\n<p><b>Đọc lại hướng dẫn trong trang:<\/b> bấm <b>📖 Hướng dẫn<\/b> trên thanh trên cùng. Người làm lịch thấy cả hai bản (cho người làm lịch và cho nhân viên); người xem chỉ thấy bản cho nhân viên. Mỗi bản tải về được dạng Word hoặc in / lưu PDF.<\/p>\n<h2 id=\"hs2\">Đăng nhập và quyền truy cập<\/h2>\n<p>Mở link trang (dạng <code>https://&lt;tên&gt;.github.io/&lt;kho&gt;/<\/code>) rồi chọn một trong hai cách:<\/p>\n<ol><li><b>Đăng nhập bằng Google<\/b>: bấm nút Google, chọn tài khoản Gmail.<\/li><li><b>Email và mật khẩu<\/b>: lần đầu bấm <b>Tạo tài khoản<\/b>, mở thư xác minh trong hộp thư (xem cả mục Thư rác), bấm link, quay lại trang bấm <b>Tôi đã xác minh<\/b>. Quên mật khẩu thì bấm <b>Quên mật khẩu<\/b>.<\/li><\/ol>\n<p>Nếu trang báo <b>Chưa được cấp quyền<\/b>, hãy gửi email đăng nhập cho người quản lý. Người quản lý thêm email đó vào danh sách, bạn tải lại trang là vào được.<\/p>\n<p><b>Cấp quyền (người quản lý):<\/b> vào <b>Cài đặt &amp; dữ liệu → Quyền truy cập<\/b>.<\/p>\n<ul><li>Ô <b>Người làm lịch<\/b>: mỗi dòng một email, được sửa mọi thứ.<\/li><li>Ô <b>Người xem<\/b>: mỗi dòng một email, chỉ xem.<\/li><li>Bấm <b>Lưu danh sách<\/b>. Xóa email khỏi danh sách là người đó mất quyền ngay.<\/li><li><b>Chép link trang để gửi mọi người<\/b>: chép đường dẫn để dán vào Zalo.<\/li><\/ul>\n<p>Góc phải thanh trên cùng hiện email đang dùng, vai trò, số người khác đang mở trang và nút Đăng xuất.<\/p>\n<h2 id=\"hs3\">Màn hình chính<\/h2>\n<p>Thanh trên cùng chứa mọi thao tác hay dùng; các tab bên dưới chia theo việc. Các nút sửa (tạo tuần, nhập, chia lịch, hoàn tác) chỉ người làm lịch mới thấy.<\/p>\n<table><thead><tr><th>Nút<\/th><th>Tác dụng<\/th><\/tr><\/thead><tbody><tr><td><b>‹ / ›<\/b> và ô chọn tuần<\/td><td>Chuyển sang tuần trước, tuần sau, hoặc chọn tuần bất kỳ đã có<\/td><\/tr><tr><td><b>+ Tuần mới<\/b><\/td><td>Tạo tuần tiếp theo (xem <i>Quy trình mỗi tuần<\/i>)<\/td><\/tr><tr><td><b>↶ Hoàn tác<\/b> / <b>↷<\/b><\/td><td>Bỏ thao tác vừa làm / làm lại. Phím tắt Ctrl+Z, Ctrl+Y<\/td><\/tr><tr><td><b>📷 Nhập từ ảnh<\/b><\/td><td>Chụp hoặc chọn ảnh sổ tay, AI tự đọc rồi hiện bảng kiểm tra<\/td><\/tr><tr><td><b>⇪ Nhập dữ liệu<\/b><\/td><td>Nhập từ ảnh, dán văn bản, CSV hoặc Excel, chọn rõ loại dữ liệu<\/td><\/tr><tr><td><b>Tự động chia<\/b><\/td><td>Máy tự xếp người vào chuyến<\/td><\/tr><tr><td><b>🔔 Nhận lịch<\/b><\/td><td>Đăng ký nhận lịch của mình qua Email / Telegram (mọi người đều thấy)<\/td><\/tr><tr><td><b>📖 Hướng dẫn<\/b><\/td><td>Mở hướng dẫn này, tải Word hoặc in / lưu PDF<\/td><\/tr><tr><td>Chấm tròn trạng thái<\/td><td>Xanh <i>Đã lưu · đồng bộ<\/i>; vàng <i>Đang lưu<\/i>; đỏ là chưa lưu được, kèm lý do<\/td><\/tr><\/tbody><\/table>\n<table><thead><tr><th>Tab<\/th><th>Ai thấy<\/th><th>Dùng để<\/th><\/tr><\/thead><tbody><tr><td><b>Lịch tuần<\/b><\/td><td>Mọi người<\/td><td>Bảng lịch chính, sửa từng ô, đếm quân số cuối bảng<\/td><\/tr><tr><td><b>Order nghỉ<\/b><\/td><td>Người làm lịch<\/td><td>Nhập OFF, NP, ốm, SBY cho cả tuần<\/td><\/tr><tr><td><b>Quân số<\/b><\/td><td>Mọi người<\/td><td>Mỗi chuyến mỗi ngày đã đủ người chưa<\/td><\/tr><tr><td><b>Lịch bay<\/b><\/td><td>Người làm lịch<\/td><td>Bật/tắt chuyến (BAY/CANX), sửa giờ, định mức riêng<\/td><\/tr><tr><td><b>Thống kê<\/b><\/td><td>Mọi người<\/td><td>Mức công bằng, cảnh báo, chi tiết từng người<\/td><\/tr><tr><td><b>Chấm công<\/b><\/td><td>Người làm lịch<\/td><td>OVER, BÙ, giờ công<\/td><\/tr><tr><td><b>Cài đặt &amp; dữ liệu<\/b><\/td><td>Người làm lịch<\/td><td>Nhân viên, slot, mã trạng thái, luật, nhập/xuất, quyền<\/td><\/tr><\/tbody><\/table>\n<h2 id=\"hs4\">Quy trình mỗi tuần<\/h2>\n<p>Mỗi tuần người làm lịch đi qua 8 bước, thường mất 10–20 phút.<\/p>\n<ol><li><b>Tạo tuần:<\/b> bấm <b>+ Tuần mới<\/b>, kiểm tra ngày thứ Hai, chọn một trong ba cách:<ul><li><i>Chép lịch bay từ tuần đang mở<\/i> (nên dùng): phân công để trống, mang theo CN cuối tuần và số đêm để xoay vòng.<\/li><li><i>Chép cả phân công<\/i>: giữ nguyên ai làm slot nào theo thứ, bỏ trạng thái nghỉ.<\/li><li><i>Tuần trống theo lịch bay mặc định<\/i>.<\/li><\/ul><\/li><li><b>Lịch bay:<\/b> vào tab Lịch bay, bấm <b>BAY ↔ CANX<\/b> cho chuyến huỷ, sửa giờ nếu đổi, đặt định mức riêng nếu ngày đó cần nhiều/ít người hơn.<\/li><li><b>Order nghỉ:<\/b> vào tab Order nghỉ, chọn OFF, NP, ốm… cho từng người. Hoặc bấm <b>📷 Nhập từ ảnh<\/b> và chụp trang sổ đăng ký nghỉ.<\/li><li><b>Tự động chia:<\/b> bấm <b>Tự động chia → Chia lịch<\/b>. Mất khoảng 1 giây.<\/li><li><b>Kiểm tra:<\/b> xem bảng đếm cuối tab Lịch tuần hoặc tab Quân số; ô đỏ là chuyến thiếu người. Xem tab Thống kê để biết cảnh báo và độ công bằng.<\/li><li><b>Sửa tay:<\/b> bấm vào ô cần đổi. Ô nào đã ưng thì bấm 🔒 để khóa, lần chia sau máy không đổi ô đó.<\/li><li><b>Gửi lịch:<\/b> bấm <b>📣 Gửi lịch<\/b> để gửi qua Email / Telegram và chép tin cho Zalo (xem mục <i>Gửi lịch cho nhân viên<\/i>).<\/li><li><b>Cuối tuần:<\/b> nhập chấm công (OVER/BÙ), xuất Excel nếu cần gửi, rồi bấm <b>🔒 Chốt tuần<\/b>.<\/li><\/ol>\n<p>Nếu có người xin nghỉ sau khi đã chia: nhập nghỉ ở Order nghỉ, rồi bấm <b>Tự động chia → Chỉ lấp chỗ trống<\/b>. Máy gỡ người đó khỏi chuyến (trừ ô đã khóa) và xếp người thay.<\/p>\n<h2 id=\"hs5\">Tab Lịch tuần<\/h2>\n<p>Mỗi dòng là một nhân viên, mỗi cột là một ngày từ thứ Hai đến Chủ nhật. Trong ô là các chuyến được xếp hoặc trạng thái nghỉ.<\/p>\n<p><b>Đọc ô:<\/b><\/p>\n<ul><li>Chip màu là một chuyến (slot); 🔒 là ô đã khóa.<\/li><li>Chữ OFF, NP, ốm, SBY… là trạng thái nghỉ hoặc trực.<\/li><li>Viền đỏ là ô vi phạm luật (thiếu giờ nghỉ, trùng giờ, quá số đêm, đang nghỉ mà vẫn có chuyến…). Đưa chuột lên ô để xem lý do.<\/li><\/ul>\n<p><b>Sửa một ô (người làm lịch):<\/b> bấm vào ô, bảng bên phải mở ra.<\/p>\n<ol><li><b>Trạng thái<\/b>: chọn OFF, NP, ốm… hoặc để trống nếu đi làm.<\/li><li><b>Chuyến đã xếp<\/b>: bấm 🔓/🔒 để khóa hoặc mở khóa từng chuyến; bấm × để bỏ chuyến.<\/li><li><b>Thêm chuyến<\/b>: chọn vị trí (Thường, Supervisor…) rồi bấm chuyến. Dòng mờ là chuyến không hợp lệ (trùng giờ, thiếu nghỉ); vẫn thêm được khi cần ngoại lệ, lịch sẽ báo đỏ.<\/li><li><b>Ghi chú<\/b>: ghi thêm nếu cần.<\/li><li>Dùng <b>‹ Ngày trước / Ngày sau ›<\/b>, <b>↑ Người trên / ↓ Người dưới<\/b> để sửa liền nhiều ô mà không đóng bảng.<\/li><\/ol>\n<p><b>Thanh công cụ trên bảng:<\/b><\/p>\n<table><thead><tr><th>Công cụ<\/th><th>Tác dụng<\/th><\/tr><\/thead><tbody><tr><td>Ô <i>Tìm nhân viên<\/i><\/td><td>Gõ tên để chỉ hiện người đó. Nhân viên dùng để xem lịch của mình<\/td><\/tr><tr><td><i>Tất cả nhóm<\/i><\/td><td>Lọc theo nhóm<\/td><\/tr><tr><td><i>Chỉ người có cảnh báo<\/i><\/td><td>Ẩn người không có vấn đề để tập trung sửa<\/td><\/tr><tr><td><i>Đếm quân số cuối bảng<\/i><\/td><td>Bật bảng đếm giống hàm COUNT trong Excel<\/td><\/tr><tr><td><b>↓ Xuống bảng đếm<\/b><\/td><td>Cuộn thẳng xuống bảng đếm<\/td><\/tr><tr><td><b>🔒 Chốt tuần<\/b><\/td><td>Khóa cả tuần (xem mục <i>Chốt tuần<\/i>)<\/td><\/tr><tr><td><b>📣 Gửi lịch<\/b><\/td><td>Gửi lịch cho nhân viên qua Email / Telegram, chép tin cho Zalo<\/td><\/tr><\/tbody><\/table>\n<p><b>Bảng đếm cuối bảng:<\/b> mỗi dòng là một chuyến, mỗi ô ghi <i>đã xếp / cần<\/i>. Ô đỏ là thiếu người, ô xanh là đủ. Bấm vào ô để xem ai đang làm và thêm người phù hợp ngay tại đó.<\/p>\n<h2 id=\"hs6\">Khi chia không đủ người<\/h2>\n<p>Nếu Tự động chia báo còn thiếu, bấm <b>🛠 Đề xuất sửa nhanh<\/b> (hoặc nút <b>🛠 Đề xuất lấp … chỗ thiếu<\/b> ở tab Quân số).<\/p>\n<ol><li><b>Đủ người không?<\/b> Bảng 7 ngày ghi <i>số lượt cần / số lượt tối đa<\/i> (số người đi làm được × số chuyến tối đa mỗi người/ngày). Ô đỏ nghĩa là dù chia khéo cũng không đủ: phải giảm định mức, thêm người (huỷ bớt OFF/NP ngày đó) hoặc cho làm thêm chuyến.<\/li><li><b>Từng chỗ thiếu:<\/b> mỗi chỗ có sẵn nút bấm:<ul><li><b>Xếp [tên]<\/b>: người này rảnh và hợp lệ.<\/li><li><b>Dời OFF [tên] sang [ngày] rồi xếp<\/b>: chỉ với OFF do máy tự thêm.<\/li><li><b>Xếp ngoại lệ [tên] (vượt: …)<\/b>: người gần đủ điều kiện nhất, chỉ vượt 1 luật nhẹ (ví dụ đã có 2 chuyến/ngày, nghỉ chưa đủ 6h). Ô được khoá 🔒 và chỉ cảnh báo vàng \"Ngoại lệ đã duyệt\".<\/li><li><b>Giảm định mức −1<\/b> cho chuyến đó ngày đó, hoặc <b>/SE → NV thường<\/b> khi thiếu người có vị trí đặc biệt.<\/li><\/ul><\/li><li><b>Thử nới luật cho cả tuần:<\/b> máy thử chia lại với từng cách (3 chuyến/ngày, thêm 1 ca đêm/tuần, đóng quầy sớm hơn 15 phút, nghỉ tối thiểu ít hơn 1 giờ, mở quầy 2,5 tiếng) và cho biết mỗi cách lấp được bao nhiêu chỗ. Bấm <b>Áp dụng &amp; chia lại<\/b> cho cách phù hợp.<\/li><\/ol>\n<p>Nếu còn nhiều chỗ có người rảnh, trang hiện nút <b>Tự động lấp chỗ trống<\/b> ở đầu để máy lấp trước.<\/p>\n<h2 id=\"hs7\">Tab Lịch bay, Order nghỉ, Quân số<\/h2>\n<h3 id=\"hs8\">Lịch bay<\/h3>\n<p>Lịch bay thay đổi theo tuần nên mỗi tuần có bản riêng; sửa tuần này không ảnh hưởng tuần khác.<\/p>\n<ul><li>Bấm <b>BAY<\/b> để chuyển thành <b>CANX<\/b> khi chuyến bị huỷ ngày đó (bấm lại để bật).<\/li><li>Sửa số hiệu và giờ ngay trong ô. Giờ ghi 4 chữ số, ví dụ <code>0215<\/code>; máy dùng giờ này để tính trùng giờ và giờ nghỉ.<\/li><li>Bấm dòng <b>định mức<\/b> để đặt số người riêng cho ngày đó (ghi <i>(riêng)<\/i> khi khác mặc định).<\/li><li><b>Đặt lại theo lịch bay mặc định<\/b>: bỏ mọi thay đổi của tuần, lấy lại từ Cài đặt → Slot.<\/li><li><b>Nhập từ ảnh / văn bản<\/b>: dán hoặc chụp lịch bay hãng gửi.<\/li><\/ul>\n<h3 id=\"hs9\">Chuyến delay<\/h3>\n<ol><li>Ở tab Lịch bay, bấm <b>⏱ báo delay<\/b> dưới chuyến bị delay (ví dụ TW4 đêm T2), nhập số phút hoặc bấm nhanh +30' … +180'.<\/li><li>Bảng bên dưới liệt kê người làm chuyến đó (kể cả người trong ca làm chung G2/G3) và ca hôm sau của họ. Ai bị <b>thiếu nghỉ<\/b> thì chọn:<ul><li><b>Đổi sang ca trễ hơn<\/b>: trang đổi ca với một người không bị delay (người đó lên ca sớm hơn).<\/li><li><b>Giữ nguyên ca (người này muốn)<\/b>: lịch giữ nguyên, chỉ cảnh báo vàng.<\/li><\/ul><\/li><li>Bấm <b>Áp dụng<\/b>. Trang báo lại ai đã đổi với ai; chưa ưng thì bấm Hoàn tác. Ô đã khoá 🔒 không bị đổi.<\/li><\/ol>\n<h3 id=\"hs10\">Order nghỉ<\/h3>\n<p>Nhập nghỉ của cả tuần trước khi chia. Chọn trong ô là lưu ngay.<\/p>\n<ul><li>Mỗi ô là danh sách: Nghỉ (OFF, OFF1/2…), Phép/ốm (NP, ốm…), Standby (SBY), Việc khác (học, TKT…).<\/li><li>Đầu cột ghi tổng OFF và phép/ốm từng ngày để cân số người nghỉ. Cột cuối là tổng OFF của mỗi người.<\/li><li>Ô hiện chip chuyến bên dưới là người đó đã có chuyến; nhập nghỉ vào đó sẽ báo đỏ ở Lịch tuần cho đến khi chia lại.<\/li><li><b>Xoá hết OFF tự thêm<\/b>: bỏ các ngày OFF máy tự thêm khi chia, giữ OFF bạn nhập.<\/li><\/ul>\n<h3 id=\"hs11\">Quân số<\/h3>\n<p>Bảng chuyến × ngày, mỗi ô ghi <i>đã xếp / định mức<\/i>; dòng nhỏ bên dưới là vị trí đặc biệt (Supervisor…). Ô đỏ là thiếu người. Bấm vào ô để xem ai đang làm, bấm <b>Bỏ<\/b> để gỡ người, hoặc chọn người phù hợp trong danh sách gợi ý để thêm.<\/p>\n<h2 id=\"hs12\">Tự động chia<\/h2>\n<p><b>Cách tính giờ làm:<\/b> mỗi chuyến tính từ lúc mở quầy (3 tiếng trước giờ bay) đến lúc đóng quầy (1 tiếng trước giờ bay). Vì vậy một người được ghép 2 chuyến cách nhau từ 2 tiếng (như AK3 16:05 + FD4 18:10, FD1 10:05 + OD 12:50) giống cách chia tay, còn chuyến sát giờ (MH 11:25 + FD3 12:00) bị chặn. Đổi ở Cài đặt → Quy tắc (Phút làm trước / sau giờ chuyến).<\/p>\n<p><b>Học theo các tuần đã chia:<\/b> khi bấm Tự động chia, máy đọc 4 tuần gần nhất và ưu tiên xếp mỗi người vào hãng / chuyến họ hay làm, cặp chuyến hay ghép (G3 + TW1, RS + Z2, EK + MH…), và hạn chế quá 5 đêm/tuần. Lượt do người chia đặt được tính nặng hơn lượt máy tự xếp. Muốn máy học nhanh: nhập file Excel lịch đã chia tay của 1–2 tuần gần nhất (⇪ Nhập dữ liệu → Excel). Chỉnh mức ưu tiên ở Cài đặt → Quy tắc. Các chuyến đêm TW (TW26, TW14, TW30) mở quầy làm chung: xếp người vào ca <b>G3<\/b> (G3/S là sup cho cả 3 chuyến; lên ca 22:25 đêm có TW26, 22:00 đêm không có) và <b>G2<\/b> (lên ca 00:50). Lịch xếp trước đây bị trùng giờ: bấm <b>Tự động chia → Chỉ lấp chỗ trống<\/b>, máy tự gỡ chỗ trùng (trừ ô khoá) rồi xếp lại.<\/p>\n<p>Bấm <b>Tự động chia<\/b>, chọn cách chia rồi bấm <b>Chia lịch<\/b>. Máy xếp từng ngày: lấp vị trí khó trước (Supervisor, vị trí đặc biệt, slot ít người làm được), chọn người hợp lệ đang ít việc nhất, rồi cân bằng giờ đêm giữa mọi người.<\/p>\n<table><thead><tr><th>Cách chia<\/th><th>Khi nào dùng<\/th><\/tr><\/thead><tbody><tr><td><b>Chỉ lấp chỗ trống<\/b><\/td><td>Đã có lịch, chỉ cần bù chỗ thiếu (có người xin nghỉ đột xuất, thêm chuyến). Giữ mọi phân công hiện có<\/td><\/tr><tr><td><b>Xếp lại toàn bộ<\/b><\/td><td>Tuần mới, hoặc muốn một phương án khác. Bỏ phân công chưa khóa và OFF tự thêm rồi chia từ đầu<\/td><\/tr><\/tbody><\/table>\n<ul><li><i>Tự thêm 1 ngày OFF cho người chưa có<\/i>: máy chọn ngày ít người nghỉ nhất. Ở tab Order nghỉ, OFF tự thêm có viền nét đứt để phân biệt với OFF bạn nhập.<\/li><li>Máy <b>không bao giờ<\/b> đổi ô đã khóa 🔒 và trạng thái nghỉ bạn nhập.<\/li><li>Mỗi lần <i>Xếp lại<\/i> cho phương án hơi khác. Chưa ưng thì bấm <b>↶ Hoàn tác<\/b>.<\/li><li>Chạy xong, trang báo số lượt đã xếp và chuyến còn thiếu (nếu có), kèm nút <b>Xem quân số<\/b>.<\/li><\/ul>\n<p>Trên thanh công cụ tab Lịch tuần còn có hai nút hỗ trợ: <b>Khoá phân công hiện có<\/b> (khóa hết ô đã xếp để lần chia sau giữ nguyên) và <b>Xoá phân công chưa khoá<\/b> (làm trống để chia lại).<\/p>\n<h2 id=\"hs13\">Nhập dữ liệu từ ảnh, văn bản, CSV, Excel<\/h2>\n<p>Cách nhanh nhất: bấm <b>📷 Nhập từ ảnh<\/b>, chụp trang sổ hoặc chọn ảnh nhận qua Zalo. AI tự nhận biết loại dữ liệu và hiện bảng kiểm tra. Muốn chọn rõ hơn thì bấm <b>⇪ Nhập dữ liệu<\/b>.<\/p>\n<p><b>Bước 1 – Loại dữ liệu:<\/b><\/p>\n<table><thead><tr><th>Loại<\/th><th>Nhập gì<\/th><\/tr><\/thead><tbody><tr><td>Tự nhận biết<\/td><td>AI tự xem ảnh là loại nào<\/td><\/tr><tr><td>Phân ca<\/td><td>Chuyến + trạng thái của từng người, từng ngày<\/td><\/tr><tr><td>OFF / NP / nghỉ<\/td><td>Chỉ trạng thái, giữ nguyên chuyến đã xếp<\/td><\/tr><tr><td>Chấm công<\/td><td>Phút OVER / BÙ ngày, đêm<\/td><\/tr><tr><td>Lịch bay<\/td><td>Chuyến, giờ, CANX theo ngày<\/td><\/tr><\/tbody><\/table>\n<p><b>Bước 2 – Nguồn:<\/b><\/p>\n<table><thead><tr><th>Nguồn<\/th><th>Cách đọc<\/th><th>Cần AI?<\/th><\/tr><\/thead><tbody><tr><td>Ảnh chụp, ảnh màn hình, PDF<\/td><td>Bấm <b>Đọc bằng AI<\/b><\/td><td>Có<\/td><\/tr><tr><td>Dán bảng từ Excel / Google Sheets<\/td><td>Bấm <b>Đọc như bảng<\/b><\/td><td>Không<\/td><\/tr><tr><td>Văn bản tự do (tin Zalo, email)<\/td><td>Bấm <b>Đọc bằng AI<\/b><\/td><td>Có<\/td><\/tr><tr><td>File CSV / TSV / TXT<\/td><td>Đọc theo cột<\/td><td>Không<\/td><\/tr><tr><td>File Excel mẫu cũ<\/td><td><b>Chọn file Excel…<\/b><\/td><td>Không<\/td><\/tr><\/tbody><\/table>\n<p>Với ảnh: chọn nhiều ảnh cùng lúc được; ảnh nghiêng bấm <b>⟳ Xoay<\/b>; ảnh chọn nhầm bấm <b>Bỏ<\/b>. Trong lúc đọc, trang hiện tiến độ từng ảnh; bấm <b>Dừng<\/b> để huỷ. AI báo bận thì trang tự thử lại; ảnh nào vẫn lỗi thì bấm <b>Đọc lại ảnh lỗi<\/b>.<\/p>\n<p><b>Bước 3 – Kiểm tra:<\/b><\/p>\n<ol><li>Bảng kiểm tra hiện ảnh gốc bên cạnh, mỗi dòng ghi nội dung đọc được và nội dung đang có trong lịch.<\/li><li>Dòng vàng là cần xem lại (tên chưa khớp, chữ mờ). Bật <i>Chỉ hiện dòng cần xem lại<\/i> để lọc.<\/li><li>Sửa trực tiếp: chọn lại nhân viên, ngày, trạng thái, chuyến; bỏ chọn dòng không muốn nhập.<\/li><li>Bấm <b>Kiểm tra xong, nhập vào lịch…<\/b>. Trang hỏi lại <i>Dữ liệu đã chuẩn chưa?<\/i>.<\/li><li>Xác nhận: trang <b>tự tạo bản sao lưu<\/b> của tuần rồi mới ghi.<\/li><\/ol>\n<p><b>Nhập sai thì sao:<\/b> bấm <b>↶ Hoàn tác<\/b> ngay sau khi nhập. Nếu đã làm thêm nhiều việc, vào <b>Cài đặt &amp; dữ liệu → Nhập / xuất dữ liệu → Xem và khôi phục…<\/b>, chọn bản sao lưu trước lần nhập đó và bấm <b>Khôi phục<\/b>. Trang giữ 30 bản gần nhất.<\/p>\n<p><b>Mẹo chụp ảnh:<\/b> chụp thẳng, đủ sáng, cả bảng nằm trong khung; bảng dài thì chụp nhiều ảnh. Viết tên đúng như danh sách nhân viên sẽ giảm dòng vàng.<\/p>\n<h2 id=\"hs14\">Thống kê, Chấm công, Xuất Excel<\/h2>\n<h3 id=\"hs15\">Thống kê<\/h3>\n<ul><li>Hàng số liệu trên cùng: vị trí còn thiếu, tỷ lệ đã phủ (%), số lỗi, số cảnh báo.<\/li><li><b>Mức độ công bằng<\/b>: biểu đồ từng người, chọn thước đo <i>Giờ công đêm<\/i>, <i>Số ca đêm<\/i>, <i>Số slot<\/i>, <i>Ngày làm<\/i>. Vạch vàng là trung bình.<\/li><li><b>Cảnh báo và vi phạm<\/b>: dòng đỏ là lỗi phải sửa, dòng vàng là cảnh báo. Bấm một dòng để nhảy đến ô đó.<\/li><li><b>Chi tiết theo nhân viên<\/b>: slot, đêm, đêm tuần trước, giờ đêm, ngày làm, OFF, phép/ốm, SBY và số chuyến theo từng hãng.<\/li><\/ul>\n<h3 id=\"hs16\">Chấm công<\/h3>\n<ol><li>Chọn ngày ở hàng nút phía trên.<\/li><li>Nhập số <b>phút<\/b> OVER ngày, OVER đêm, BÙ ngày, BÙ đêm cho từng người. Gõ xong là lưu.<\/li><li>Các cột tổng, giờ công và giờ đêm tự tính. Giờ công mặc định = số ngày làm × 8 giờ (đổi ở Cài đặt → Quy tắc).<\/li><\/ol>\n<p>Có thể chụp sổ chấm công rồi nhập bằng <b>📷 Nhập từ ảnh<\/b>.<\/p>\n<h3 id=\"hs17\">Xuất Excel<\/h3>\n<p>Bấm <b>Xuất Excel<\/b> (tab Lịch tuần) hoặc <b>Tải file Excel<\/b> (Cài đặt → Nhập / xuất). File có màu giống trên web, gồm 7 sheet: Lịch tuần (kèm bảng đếm quân số), Quân số, Lịch bay, Order nghỉ, Thống kê, Chấm công, Cảnh báo. Khổ in ngang, có số trang. Người xem cũng xuất được.<\/p>\n<h2 id=\"hs18\">Chốt tuần và nhân viên nghỉ việc<\/h2>\n<p>Chốt tuần giữ lịch đã chạy và chấm công đúng như lúc đó, kể cả khi sau này danh sách nhân viên hoặc chuyến thay đổi.<\/p>\n<ol><li>Mở tuần đã xong và đã chấm công.<\/li><li>Bấm <b>🔒 Chốt tuần<\/b> trên thanh công cụ tab Lịch tuần, xác nhận.<\/li><li>Đầu trang hiện dải <b>Tuần đã chốt<\/b> kèm thời điểm và người chốt.<\/li><\/ol>\n<p>Tuần đã chốt không sửa được: không nhập dữ liệu, không tự động chia, không sửa cài đặt trong lúc đang mở tuần đó. Vẫn xem và xuất Excel bình thường. Cần sửa thì bấm <b>Mở khoá để sửa<\/b> trên dải báo, sửa xong chốt lại.<\/p>\n<p><b>Nhân viên nghỉ việc, chuyến bỏ hẳn:<\/b> khi bấm <b>Xoá<\/b> ở Cài đặt, trang hỏi lại và gợi ý:<\/p>\n<ul><li><b>Chuyển sang tạm nghỉ<\/b> (với người) hoặc <b>Tắt slot<\/b> (với chuyến): ẩn khỏi các tuần mới nhưng tuần cũ vẫn còn tên. Nên chọn cách này.<\/li><li><b>Xoá hẳn<\/b>: chỉ dùng khi nhập nhầm. Tuần đã chốt vẫn giữ tên; tuần chưa chốt sẽ mất dòng của người đó.<\/li><\/ul>\n<h2 id=\"hs19\">Cài đặt &amp; dữ liệu<\/h2>\n<p>Cài đặt dùng chung cho mọi tuần chưa chốt; sửa xong là lưu và tính lại cảnh báo ngay.<\/p>\n<table><thead><tr><th>Mục<\/th><th>Chỉnh gì<\/th><\/tr><\/thead><tbody><tr><td><b>Nhân viên<\/b><\/td><td>Tên, nhóm, loại (Chuyến bay / Ticket / PVDB), vị trí được xếp (/S, /C, /G…), Không đêm, Tự động chia (bỏ chọn = chỉ xếp tay), Đang làm (bỏ chọn = tạm nghỉ), Chỉ làm (để trống = mọi hãng; ghi ví dụ AK, FD, VZ1 để giới hạn), ghi chú. <b>+ Thêm nhân viên<\/b> ở đầu bảng<\/td><\/tr><tr><td><b>Slot chuyến bay<\/b><\/td><td>Hãng, số hiệu, giờ, tuyến, giờ đêm, phút làm trước/sau chuyến (mặc định mở quầy 3 tiếng trước giờ bay), <b>Lên ca<\/b>, <b>Lên ca nếu có chuyến<\/b> (vd TW3=2225), <b>Xuống ca<\/b>, <b>Làm chung chuyến<\/b> (vd G3 làm chung TW3, TW4, TW5), số người cần theo từng vị trí, ngày bay mặc định T2→CN. <b>+ Thêm slot<\/b><\/td><\/tr><tr><td><b>Mã trạng thái<\/b><\/td><td>OFF, NP, ốm, SBY, học…: ý nghĩa, có chặn xếp chuyến không, loại (nghỉ / phép / standby / việc khác), tính bao nhiêu OFF. <b>+ Thêm mã<\/b><\/td><\/tr><tr><td><b>Quy tắc chia lịch<\/b><\/td><td>Tối đa slot/ngày, giờ nghỉ tối thiểu giữa 2 ngày, tối đa ca đêm/tuần, OFF tối thiểu, tối đa ngày làm, phút trước/sau chuyến, giờ ranh giới qua đêm, cặp slot được làm cùng giờ, giờ công mỗi ca, tự thêm OFF, tên nhóm<\/td><\/tr><tr><td><b>Nhập / xuất dữ liệu<\/b><\/td><td>Nhập từ ảnh/văn bản, bản sao lưu tự động, nhập file Excel mẫu cũ, tải file Excel, tải/khôi phục bản sao lưu toàn bộ (JSON), xoá tuần, Đọc ảnh bằng AI, Thư viện của trang<\/td><\/tr><tr><td><b>Quyền truy cập<\/b><\/td><td>Danh sách email người làm lịch và người xem<\/td><\/tr><tr><td><b>Gửi tin<\/b><\/td><td>Bật gửi lịch qua Email (Gmail) và Telegram, xem danh sách người đăng ký<\/td><\/tr><\/tbody><\/table>\n<p><b>Bật AI đọc ảnh (người quản lý làm một lần):<\/b><\/p>\n<ol><li>Mở aistudio.google.com/apikey, đăng nhập Google, bấm <b>Create API key<\/b>, chép khoá (dạng <code>AQ.Ab…<\/code>).<\/li><li>Vào <b>Nhập / xuất dữ liệu → Đọc ảnh bằng AI<\/b>, dán khoá, bấm <b>Bật cho cả nhóm<\/b>.<\/li><li>Bấm <b>Kiểm tra khoá<\/b> để thử. <b>Đổi khoá<\/b> khi cần thay, <b>Tắt AI<\/b> để ngừng.<\/li><\/ol>\n<p>Khoá lưu trên Firebase, chỉ người làm lịch dùng được. Không dán khoá vào file nào trên GitHub.<\/p>\n<p><b>Thư viện của trang (một lần):<\/b> bấm <b>Tải bộ thư viện (lib.zip)<\/b>, giải nén ra thư mục <code>lib<\/code>, tải cả thư mục lên kho GitHub cùng chỗ với <code>index.html<\/code>. Khi đã xong, mục này hiện <i>✓ Đã lưu trong kho GitHub<\/i>.<\/p>\n<p><b>Sao lưu định kỳ:<\/b> cuối mỗi tuần bấm <b>Tải bản sao lưu<\/b> để giữ một file JSON trên máy. File này chứa tên nhân viên, không đưa lên GitHub.<\/p>\n<h2 id=\"hs20\">Gửi lịch cho nhân viên (Zalo, SMS, Email, Telegram)<\/h2>\n<p>Cách đơn giản nhất chỉ cần <b>số điện thoại<\/b> và/hoặc <b>email<\/b> của từng người. Nhân viên không phải đăng ký gì.<\/p>\n<p><b>Nhập danh bạ (một lần):<\/b> vào <b>Cài đặt &amp; dữ liệu → Gửi tin → Danh bạ nhận lịch<\/b>.<\/p>\n<ul><li>Gõ SĐT, email vào từng dòng, hoặc bấm <b>Dán nhanh cả danh sách<\/b>: mỗi dòng <i>Tên, SĐT, email<\/i> (chép từ Excel/Zalo được), bấm <b>Điền vào danh bạ<\/b>.<\/li><li>Danh bạ chỉ người làm lịch xem được.<\/li><\/ul>\n<p><b>Gửi mỗi tuần:<\/b> bấm <b>📣 Gửi lịch<\/b> ở tab Lịch tuần, chọn <b>Lịch cả tuần<\/b> hoặc <b>Chỉ người có thay đổi<\/b> (ngày đổi được đánh dấu \"◀ mới\"). Ở danh sách <b>Gửi từng người<\/b>:<\/p>\n<table><thead><tr><th>Nút<\/th><th>Làm gì<\/th><th>Bạn cần làm<\/th><\/tr><\/thead><tbody><tr><td><b>Zalo<\/b><\/td><td>Chép sẵn tin và mở khung chat Zalo của số điện thoại đó<\/td><td>Dán (giữ ngón tay → Dán) rồi gửi<\/td><\/tr><tr><td><b>SMS<\/b><\/td><td>Mở tin nhắn điện thoại soạn sẵn (dùng trên điện thoại)<\/td><td>Bấm gửi<\/td><\/tr><tr><td><b>Email<\/b><\/td><td>Mở thư soạn sẵn trong ứng dụng email<\/td><td>Bấm gửi<\/td><\/tr><tr><td><b>Chép<\/b><\/td><td>Chép tin để dán vào bất cứ đâu<\/td><td><\/td><\/tr><\/tbody><\/table>\n<p>Nút <b>Chép tin cho nhóm Zalo<\/b> tạo tin báo \"lịch đã có\" kèm danh sách người bị đổi lịch, để dán vào nhóm Zalo của tổ.<\/p>\n<p><b>Tuỳ chọn: gửi tự động, không phải bấm từng người<\/b><\/p>\n<ul><li><b>Email tự động<\/b> (miễn phí qua Gmail, khoảng 100 thư/ngày): ở Cài đặt → Gửi tin, làm 5 bước tạo Google Apps Script (khoảng 10 phút, một lần). Sau đó bấm <b>Gửi ngay<\/b> là email tự đi tới mọi người có email trong danh bạ.<\/li><li><b>Telegram tự động:<\/b> tạo bot với @BotFather, dán mã bot. Telegram không gửi được theo số điện thoại, nên nhân viên phải tự bấm <b>🔔 Nhận lịch → Kết nối Telegram<\/b> một lần.<\/li><li>Zalo không có cách gửi tự động miễn phí, nên dùng nút Zalo ở trên.<\/li><\/ul>\n<p>Nhân viên vẫn có thể tự bấm <b>🔔 Nhận lịch<\/b> để tự nhập email của mình; người làm lịch không cần làm gì thêm.<\/p>\n<h2 id=\"hs21\">Câu hỏi thường gặp và xử lý lỗi<\/h2>\n<table><thead><tr><th>Gặp<\/th><th>Cách xử lý<\/th><\/tr><\/thead><tbody><tr><td><i>Chưa được cấp quyền<\/i><\/td><td>Gửi email đăng nhập cho người quản lý để thêm vào Quyền truy cập<\/td><\/tr><tr><td>Không thấy nút sửa, Tự động chia<\/td><td>Tài khoản đang là Người xem<\/td><\/tr><tr><td><i>Tuần này đã chốt nên không sửa được<\/i><\/td><td>Bấm <b>Mở khoá để sửa<\/b> trên dải báo đầu trang<\/td><\/tr><tr><td><i>Không có quyền ghi… hãy dán lại firestore.rules<\/i><\/td><td>Người quản lý dán file <code>firestore.rules<\/code> mới vào Firebase và bấm Publish<\/td><\/tr><tr><td><i>AI đọc ảnh chưa được bật<\/i><\/td><td>Người quản lý bật theo mục <i>Cài đặt<\/i>. Trong lúc chờ, dùng Dán văn bản<\/td><\/tr><tr><td><i>Gemini đang quá tải<\/i><\/td><td>Trang tự thử lại. Nếu vẫn lỗi, đợi vài phút rồi bấm <b>Đọc lại ảnh lỗi<\/b><\/td><\/tr><tr><td>AI đọc sai tên<\/td><td>Chọn lại tên trong bảng kiểm tra trước khi nhập<\/td><\/tr><tr><td>Nhập nhầm dữ liệu<\/td><td>↶ Hoàn tác, hoặc khôi phục bản sao lưu tự động<\/td><\/tr><tr><td>Chuyến vẫn thiếu sau khi chia<\/td><td>Không còn người hợp lệ (đã nghỉ, thiếu giờ nghỉ, hết số đêm). Bấm ô đỏ ở Quân số để thêm ngoại lệ, hoặc nới quy tắc<\/td><\/tr><tr><td>Người khác không thấy thay đổi<\/td><td>Xem chấm trạng thái đã xanh <i>Đã lưu · đồng bộ<\/i> chưa. Tab ở nền quá 1 phút sẽ tự đồng bộ khi mở lại<\/td><\/tr><tr><td>Nhân viên bấm Start mà chưa kết nối Telegram<\/td><td>Người làm lịch mở trang, vào Cài đặt → Gửi tin → <b>Cập nhật kết nối<\/b>. Nếu đã quá 1 ngày, nhân viên bấm Kết nối lại<\/td><\/tr><tr><td>Email báo <i>Sai khoá bí mật<\/i><\/td><td>Bấm <b>Chép mã Apps Script<\/b> lại, dán đè vào Apps Script, Triển khai → Quản lý triển khai → sửa → Phiên bản mới<\/td><\/tr><tr><td>GitHub đã cập nhật mà trang chưa đổi<\/td><td>Đợi 1–2 phút rồi tải lại trang (Ctrl+F5)<\/td><\/tr><\/tbody><\/table>\n<p>Bản quyền © 2026 ThienNV · thiennv@vnpt-technology.vn · 0888.99.33.00<\/p>"};
+const HELP_DOCS = {"staff": "<p>Xem lịch của mình chỉ cần 3 bước: mở link, đăng nhập, gõ tên vào ô tìm kiếm. Muốn lịch tự gửi tới, bấm 🔔 Nhận lịch (mục 4).<\/p>\n<h2 id=\"hs1\">1. Vào trang lần đầu<\/h2>\n<ol><li>Mở link trang lịch mà người quản lý gửi qua Zalo. Nên lưu lại (ghim tin nhắn hoặc thêm vào màn hình chính điện thoại).<\/li><li>Đăng nhập một trong hai cách:<ul><li>Bấm nút <b>Google<\/b> và chọn tài khoản Gmail.<\/li><li>Hoặc bấm <b>Tạo tài khoản<\/b> bằng email, mở thư xác minh (xem cả mục Thư rác), bấm link trong thư, quay lại bấm <b>Tôi đã xác minh<\/b>.<\/li><\/ul><\/li><li>Nếu trang báo <b>Chưa được cấp quyền<\/b>: gửi email bạn vừa dùng cho người quản lý. Khi được thêm, tải lại trang là vào được.<\/li><\/ol>\n<p>Lần sau mở link là vào thẳng, không cần đăng nhập lại.<\/p>\n<h2 id=\"hs2\">2. Xem lịch của mình<\/h2>\n<ol><li>Trang mở sẵn tab <b>Lịch tuần<\/b>.<\/li><li>Kiểm tra tuần ở thanh trên cùng (ví dụ <i>05/10 – 11/10/2026<\/i>). Bấm <b>‹<\/b> / <b>›<\/b> để sang tuần trước, tuần sau, hoặc bấm vào ô tuần để chọn.<\/li><li>Gõ tên mình vào ô <b>Tìm nhân viên<\/b>. Bảng chỉ còn dòng của bạn.<\/li><li>Đọc từ trái sang phải, thứ Hai đến Chủ nhật. Mỗi ô là chuyến được xếp hoặc trạng thái nghỉ của ngày đó. Cột <i>CN trước<\/i> là Chủ nhật tuần trước, để biết giờ nghỉ.<\/li><li>Trên máy tính, đưa chuột lên một chuyến để xem số hiệu và giờ bay.<\/li><\/ol>\n<p>Lịch tự cập nhật khi người làm lịch sửa, không cần tải lại trang. Muốn lưu về máy, bấm <b>Xuất Excel<\/b>.<\/p>\n<h2 id=\"hs3\">3. Ký hiệu trong ô<\/h2>\n<table><thead><tr><th>Thấy trong ô<\/th><th>Nghĩa là<\/th><\/tr><\/thead><tbody><tr><td>Chip nền sáng, ví dụ <code>AK1<\/code><\/td><td>Chuyến ban ngày<\/td><\/tr><tr><td>Chip nền xanh đậm, ví dụ <code>LJ3<\/code><\/td><td>Chuyến ban đêm<\/td><\/tr><tr><td>Chữ nghiêng sau chuyến, ví dụ <code>AK1/S<\/code><\/td><td>Vị trí bạn đảm nhận (S = Supervisor…)<\/td><\/tr><tr><td>🔒<\/td><td>Người làm lịch đã chốt ô này<\/td><\/tr><tr><td><b>OFF<\/b> (nền xám)<\/td><td>Ngày nghỉ. <i>OFF1/2<\/i> là nghỉ nửa ngày<\/td><\/tr><tr><td><b>NP<\/b>, ốm (nền tím)<\/td><td>Nghỉ phép, nghỉ ốm<\/td><\/tr><tr><td><b>SBY<\/b> (nền xanh dương)<\/td><td>Trực dự phòng<\/td><\/tr><tr><td>Ô viền đỏ<\/td><td>Lịch đang có vấn đề, người làm lịch sẽ sửa<\/td><\/tr><tr><td>Ô trống<\/td><td>Chưa xếp việc<\/td><\/tr><\/tbody><\/table>\n<p>Dải vàng <b>Tuần đã chốt<\/b> ở đầu trang nghĩa là lịch tuần đó là bản cuối cùng.<\/p>\n<h2 id=\"hs4\">4. Nhận lịch qua email hoặc Telegram<\/h2>\n<p>Bạn có thể nhận lịch của mình tự động, không cần mở trang.<\/p>\n<ol><li>Bấm <b>🔔 Nhận lịch<\/b> trên thanh trên cùng.<\/li><li>Chọn <b>tên của bạn<\/b> trong danh sách.<\/li><li>Chọn cách nhận:<ul><li><b>Email<\/b>: đánh dấu và kiểm tra địa chỉ email.<\/li><li><b>Telegram<\/b>: bấm <b>Kết nối Telegram<\/b>, Telegram mở ra, bấm <b>Start<\/b>. Khi bot nhắn \"✅ Đã kết nối\" là xong (có thể mất vài giờ, khi người làm lịch mở trang).<\/li><\/ul><\/li><li>Chọn nhận khi <b>Có lịch tuần mới<\/b> và/hoặc khi <b>Lịch của tôi bị thay đổi<\/b>, bấm <b>Lưu<\/b>.<\/li><\/ol>\n<p>Tin nhắn ghi lịch 7 ngày của bạn; ngày bị đổi có dấu \"◀ mới\". Muốn ngừng: <b>🔔 Nhận lịch → Tắt nhận tin<\/b>. Lịch cũng được gửi trong nhóm Zalo của tổ như trước.<\/p>\n<h2 id=\"hs5\">5. Các tab và câu hỏi thường gặp<\/h2>\n<table><thead><tr><th>Tab<\/th><th>Xem gì<\/th><\/tr><\/thead><tbody><tr><td><b>Lịch tuần<\/b><\/td><td>Lịch của mọi người trong tuần<\/td><\/tr><tr><td><b>Quân số<\/b><\/td><td>Mỗi chuyến mỗi ngày có những ai làm<\/td><\/tr><tr><td><b>Thống kê<\/b><\/td><td>Số ca đêm, số ngày làm, số OFF của từng người<\/td><\/tr><\/tbody><\/table>\n<ul><li><b>Muốn đổi ca hoặc xin nghỉ?<\/b> Báo người làm lịch như trước. Trang chỉ để xem, bạn không sửa được.<\/li><li><b>Không thấy tên mình?<\/b> Kiểm tra đúng tuần chưa, gõ ngắn hơn (ví dụ chỉ gõ tên). Vẫn không có thì báo người làm lịch.<\/li><li><b>Tuần sau chưa có?<\/b> Người làm lịch chưa tạo. Quay lại xem sau.<\/li><li><b>Dùng máy khác hoặc máy chung?<\/b> Bấm <b>Đăng xuất<\/b> ở góc phải trên cùng khi xem xong.<\/li><li><b>Cần xem lại hướng dẫn này?<\/b> Bấm <b>📖 Hướng dẫn<\/b> trên thanh trên cùng. Trong đó có nút tải về file Word hoặc in / lưu PDF.<\/li><\/ul>\n<p>Bản quyền © 2026 ThienNV · thiennv@vnpt-technology.vn · 0888.99.33.00<\/p>", "editor": "<h2 id=\"hs1\">Giới thiệu<\/h2>\n<p>Phân Ca Sân Bay là trang web chia lịch và chấm công cho nhân viên mặt đất. Trang tự xếp người vào chuyến theo luật nghỉ ngơi, đếm quân số từng chuyến và xuất ra Excel có màu. Dữ liệu lưu trên Firebase nên mọi người cùng thấy một bản duy nhất, cập nhật ngay khi có người sửa.<\/p>\n<p>Có hai vai trò:<\/p>\n<table><thead><tr><th>Vai trò<\/th><th>Làm được gì<\/th><\/tr><\/thead><tbody><tr><td><b>Người làm lịch<\/b> (editor)<\/td><td>Tạo tuần mới, sửa lịch bay, nhập OFF/NP, tự động chia, sửa tay, nhập dữ liệu từ ảnh, chốt tuần, chỉnh cài đặt, xuất Excel<\/td><\/tr><tr><td><b>Người xem<\/b> (viewer)<\/td><td>Xem Lịch tuần, Quân số, Thống kê; tìm tên mình; xuất Excel. Không sửa được gì<\/td><\/tr><\/tbody><\/table>\n<p>Chủ dự án (email ghi trong dòng <code>OWNERS<\/code> của luật Firebase) luôn là người làm lịch và là người cấp quyền cho người khác.<\/p>\n<p><b>Mẹo:<\/b> trên máy tính, đưa chuột lên bất kỳ nút nào để xem hướng dẫn nhanh của nút đó.<\/p>\n<p><b>Đọc lại hướng dẫn trong trang:<\/b> bấm <b>📖 Hướng dẫn<\/b> trên thanh trên cùng. Người làm lịch thấy cả hai bản (cho người làm lịch và cho nhân viên); người xem chỉ thấy bản cho nhân viên. Mỗi bản tải về được dạng Word hoặc in / lưu PDF.<\/p>\n<h2 id=\"hs2\">Đăng nhập và quyền truy cập<\/h2>\n<p>Mở link trang (dạng <code>https://&lt;tên&gt;.github.io/&lt;kho&gt;/<\/code>) rồi chọn một trong hai cách:<\/p>\n<ol><li><b>Đăng nhập bằng Google<\/b>: bấm nút Google, chọn tài khoản Gmail.<\/li><li><b>Email và mật khẩu<\/b>: lần đầu bấm <b>Tạo tài khoản<\/b>, mở thư xác minh trong hộp thư (xem cả mục Thư rác), bấm link, quay lại trang bấm <b>Tôi đã xác minh<\/b>. Quên mật khẩu thì bấm <b>Quên mật khẩu<\/b>.<\/li><\/ol>\n<p>Nếu trang báo <b>Chưa được cấp quyền<\/b>, hãy gửi email đăng nhập cho người quản lý. Người quản lý thêm email đó vào danh sách, bạn tải lại trang là vào được.<\/p>\n<p><b>Cấp quyền (người quản lý):<\/b> vào <b>Cài đặt &amp; dữ liệu → Quyền truy cập<\/b>.<\/p>\n<ul><li>Ô <b>Người làm lịch<\/b>: mỗi dòng một email, được sửa mọi thứ.<\/li><li>Ô <b>Người xem<\/b>: mỗi dòng một email, chỉ xem.<\/li><li>Bấm <b>Lưu danh sách<\/b>. Xóa email khỏi danh sách là người đó mất quyền ngay.<\/li><li><b>Chép link trang để gửi mọi người<\/b>: chép đường dẫn để dán vào Zalo.<\/li><\/ul>\n<p>Góc phải thanh trên cùng hiện email đang dùng, vai trò, số người khác đang mở trang và nút Đăng xuất.<\/p>\n<h2 id=\"hs3\">Màn hình chính<\/h2>\n<p>Thanh trên cùng chứa mọi thao tác hay dùng; các tab bên dưới chia theo việc. Các nút sửa (tạo tuần, nhập, chia lịch, hoàn tác) chỉ người làm lịch mới thấy.<\/p>\n<table><thead><tr><th>Nút<\/th><th>Tác dụng<\/th><\/tr><\/thead><tbody><tr><td><b>‹ / ›<\/b> và ô chọn tuần<\/td><td>Chuyển sang tuần trước, tuần sau, hoặc chọn tuần bất kỳ đã có<\/td><\/tr><tr><td><b>+ Tuần mới<\/b><\/td><td>Tạo tuần tiếp theo (xem <i>Quy trình mỗi tuần<\/i>)<\/td><\/tr><tr><td><b>↶ Hoàn tác<\/b> / <b>↷<\/b><\/td><td>Bỏ thao tác vừa làm / làm lại. Phím tắt Ctrl+Z, Ctrl+Y<\/td><\/tr><tr><td><b>📷 Nhập từ ảnh<\/b><\/td><td>Chụp hoặc chọn ảnh sổ tay, AI tự đọc rồi hiện bảng kiểm tra<\/td><\/tr><tr><td><b>⇪ Nhập dữ liệu<\/b><\/td><td>Nhập từ ảnh, dán văn bản, CSV hoặc Excel, chọn rõ loại dữ liệu<\/td><\/tr><tr><td><b>Tự động chia<\/b><\/td><td>Máy tự xếp người vào chuyến<\/td><\/tr><tr><td><b>🔔 Nhận lịch<\/b><\/td><td>Đăng ký nhận lịch của mình qua Email / Telegram (mọi người đều thấy)<\/td><\/tr><tr><td><b>📖 Hướng dẫn<\/b><\/td><td>Mở hướng dẫn này, tải Word hoặc in / lưu PDF<\/td><\/tr><tr><td>Chấm tròn trạng thái<\/td><td>Xanh <i>Đã lưu · đồng bộ<\/i>; vàng <i>Đang lưu<\/i>; đỏ là chưa lưu được, kèm lý do<\/td><\/tr><\/tbody><\/table>\n<table><thead><tr><th>Tab<\/th><th>Ai thấy<\/th><th>Dùng để<\/th><\/tr><\/thead><tbody><tr><td><b>Lịch tuần<\/b><\/td><td>Mọi người<\/td><td>Bảng lịch chính, sửa từng ô, đếm quân số cuối bảng<\/td><\/tr><tr><td><b>Order nghỉ<\/b><\/td><td>Người làm lịch<\/td><td>Nhập OFF, NP, ốm, SBY cho cả tuần<\/td><\/tr><tr><td><b>Quân số<\/b><\/td><td>Mọi người<\/td><td>Mỗi chuyến mỗi ngày đã đủ người chưa<\/td><\/tr><tr><td><b>Lịch bay<\/b><\/td><td>Người làm lịch<\/td><td>Bật/tắt chuyến (BAY/CANX), sửa giờ, định mức riêng<\/td><\/tr><tr><td><b>Thống kê<\/b><\/td><td>Mọi người<\/td><td>Mức công bằng, cảnh báo, chi tiết từng người<\/td><\/tr><tr><td><b>Chấm công<\/b><\/td><td>Người làm lịch<\/td><td>OVER, BÙ, giờ công<\/td><\/tr><tr><td><b>Cài đặt &amp; dữ liệu<\/b><\/td><td>Người làm lịch<\/td><td>Nhân viên, slot, mã trạng thái, luật, nhập/xuất, quyền<\/td><\/tr><\/tbody><\/table>\n<h2 id=\"hs4\">Quy trình mỗi tuần<\/h2>\n<p>Mỗi tuần người làm lịch đi qua 8 bước, thường mất 10–20 phút.<\/p>\n<ol><li><b>Tạo tuần:<\/b> bấm <b>+ Tuần mới<\/b>, kiểm tra ngày thứ Hai, chọn một trong ba cách:<ul><li><i>Chép lịch bay từ tuần đang mở<\/i> (nên dùng): phân công để trống, mang theo CN cuối tuần và số đêm để xoay vòng.<\/li><li><i>Chép cả phân công<\/i>: giữ nguyên ai làm slot nào theo thứ, bỏ trạng thái nghỉ.<\/li><li><i>Tuần trống theo lịch bay mặc định<\/i>.<\/li><\/ul><\/li><li><b>Lịch bay:<\/b> vào tab Lịch bay, bấm <b>BAY ↔ CANX<\/b> cho chuyến huỷ, sửa giờ nếu đổi, đặt định mức riêng nếu ngày đó cần nhiều/ít người hơn.<\/li><li><b>Order nghỉ:<\/b> vào tab Order nghỉ, chọn OFF, NP, ốm… cho từng người. Hoặc bấm <b>📷 Nhập từ ảnh<\/b> và chụp trang sổ đăng ký nghỉ.<\/li><li><b>Tự động chia:<\/b> bấm <b>Tự động chia → Chia lịch<\/b>. Mất khoảng 1 giây.<\/li><li><b>Kiểm tra:<\/b> xem bảng đếm cuối tab Lịch tuần hoặc tab Quân số; ô đỏ là chuyến thiếu người. Xem tab Thống kê để biết cảnh báo và độ công bằng.<\/li><li><b>Sửa tay:<\/b> bấm vào ô cần đổi. Ô nào đã ưng thì bấm 🔒 để khóa, lần chia sau máy không đổi ô đó.<\/li><li><b>Gửi lịch:<\/b> bấm <b>📣 Gửi lịch<\/b> để gửi qua Email / Telegram và chép tin cho Zalo (xem mục <i>Gửi lịch cho nhân viên<\/i>).<\/li><li><b>Cuối tuần:<\/b> nhập chấm công (OVER/BÙ), xuất Excel nếu cần gửi, rồi bấm <b>🔒 Chốt tuần<\/b>.<\/li><\/ol>\n<p>Nếu có người xin nghỉ sau khi đã chia: nhập nghỉ ở Order nghỉ, rồi bấm <b>Tự động chia → Chỉ lấp chỗ trống<\/b>. Máy gỡ người đó khỏi chuyến (trừ ô đã khóa) và xếp người thay.<\/p>\n<h2 id=\"hs5\">Tab Lịch tuần<\/h2>\n<p>Mỗi dòng là một nhân viên, mỗi cột là một ngày từ thứ Hai đến Chủ nhật. Trong ô là các chuyến được xếp hoặc trạng thái nghỉ.<\/p>\n<p><b>Đọc ô:<\/b><\/p>\n<ul><li>Chip màu là một chuyến (slot); 🔒 là ô đã khóa.<\/li><li>Chữ OFF, NP, ốm, SBY… là trạng thái nghỉ hoặc trực.<\/li><li>Viền đỏ là ô vi phạm luật (thiếu giờ nghỉ, trùng giờ, quá số đêm, đang nghỉ mà vẫn có chuyến…). Đưa chuột lên ô để xem lý do.<\/li><\/ul>\n<p><b>Sửa một ô (người làm lịch):<\/b> bấm vào ô, bảng bên phải mở ra.<\/p>\n<ol><li><b>Trạng thái<\/b>: chọn OFF, NP, ốm… hoặc để trống nếu đi làm.<\/li><li><b>Chuyến đã xếp<\/b>: bấm 🔓/🔒 để khóa hoặc mở khóa từng chuyến; bấm × để bỏ chuyến.<\/li><li><b>Thêm chuyến<\/b>: chọn vị trí (Thường, Supervisor…) rồi bấm chuyến. Dòng mờ là chuyến không hợp lệ (trùng giờ, thiếu nghỉ); vẫn thêm được khi cần ngoại lệ, lịch sẽ báo đỏ.<\/li><li><b>Ghi chú<\/b>: ghi thêm nếu cần.<\/li><li>Dùng <b>‹ Ngày trước / Ngày sau ›<\/b>, <b>↑ Người trên / ↓ Người dưới<\/b> để sửa liền nhiều ô mà không đóng bảng.<\/li><\/ol>\n<p><b>Thanh công cụ trên bảng:<\/b><\/p>\n<table><thead><tr><th>Công cụ<\/th><th>Tác dụng<\/th><\/tr><\/thead><tbody><tr><td>Ô <i>Tìm nhân viên<\/i><\/td><td>Gõ tên để chỉ hiện người đó. Nhân viên dùng để xem lịch của mình<\/td><\/tr><tr><td><i>Tất cả nhóm<\/i><\/td><td>Lọc theo nhóm<\/td><\/tr><tr><td><i>Chỉ người có cảnh báo<\/i><\/td><td>Ẩn người không có vấn đề để tập trung sửa<\/td><\/tr><tr><td><i>Đếm quân số cuối bảng<\/i><\/td><td>Bật bảng đếm giống hàm COUNT trong Excel<\/td><\/tr><tr><td><b>↓ Xuống bảng đếm<\/b><\/td><td>Cuộn thẳng xuống bảng đếm<\/td><\/tr><tr><td><b>🔒 Chốt tuần<\/b><\/td><td>Khóa cả tuần (xem mục <i>Chốt tuần<\/i>)<\/td><\/tr><tr><td><b>📣 Gửi lịch<\/b><\/td><td>Gửi lịch cho nhân viên qua Email / Telegram, chép tin cho Zalo<\/td><\/tr><\/tbody><\/table>\n<p><b>Bảng đếm cuối bảng:<\/b> mỗi dòng là một chuyến, mỗi ô ghi <i>đã xếp / cần<\/i>. Ô đỏ là thiếu người, ô xanh là đủ. Bấm vào ô để xem ai đang làm và thêm người phù hợp ngay tại đó.<\/p>\n<h2 id=\"hs6\">Khi chia không đủ người<\/h2>\n<p>Nếu Tự động chia báo còn thiếu, bấm <b>🛠 Đề xuất sửa nhanh<\/b> (hoặc nút <b>🛠 Đề xuất lấp … chỗ thiếu<\/b> ở tab Quân số).<\/p>\n<ol><li><b>Đủ người không?<\/b> Bảng 7 ngày ghi <i>số lượt cần / số lượt tối đa<\/i> (số người đi làm được × số chuyến tối đa mỗi người/ngày). Ô đỏ nghĩa là dù chia khéo cũng không đủ: phải giảm định mức, thêm người (huỷ bớt OFF/NP ngày đó) hoặc cho làm thêm chuyến.<\/li><li><b>Từng chỗ thiếu:<\/b> mỗi chỗ có sẵn nút bấm:<ul><li><b>Xếp [tên]<\/b>: người này rảnh và hợp lệ.<\/li><li><b>Dời OFF [tên] sang [ngày] rồi xếp<\/b>: chỉ với OFF do máy tự thêm.<\/li><li><b>Xếp ngoại lệ [tên] (vượt: …)<\/b>: người gần đủ điều kiện nhất, chỉ vượt 1 luật nhẹ (ví dụ đã có 2 chuyến/ngày, nghỉ chưa đủ 6h). Ô được khoá 🔒 và chỉ cảnh báo vàng \"Ngoại lệ đã duyệt\".<\/li><li><b>Giảm định mức −1<\/b> cho chuyến đó ngày đó, hoặc <b>/SE → NV thường<\/b> khi thiếu người có vị trí đặc biệt.<\/li><\/ul><\/li><li><b>Thử nới luật cho cả tuần:<\/b> máy thử chia lại với từng cách (3 chuyến/ngày, thêm 1 ca đêm/tuần, đóng quầy sớm hơn 15 phút, nghỉ tối thiểu ít hơn 1 giờ, mở quầy 2,5 tiếng) và cho biết mỗi cách lấp được bao nhiêu chỗ. Bấm <b>Áp dụng &amp; chia lại<\/b> cho cách phù hợp.<\/li><\/ol>\n<p>Nếu còn nhiều chỗ có người rảnh, trang hiện nút <b>Tự động lấp chỗ trống<\/b> ở đầu để máy lấp trước.<\/p>\n<h2 id=\"hs7\">Tab Lịch bay, Order nghỉ, Quân số<\/h2>\n<h3 id=\"hs8\">Lịch bay<\/h3>\n<p>Lịch bay thay đổi theo tuần nên mỗi tuần có bản riêng; sửa tuần này không ảnh hưởng tuần khác.<\/p>\n<ul><li>Bấm <b>BAY<\/b> để chuyển thành <b>CANX<\/b> khi chuyến bị huỷ ngày đó (bấm lại để bật).<\/li><li>Sửa số hiệu và giờ ngay trong ô. Giờ ghi 4 chữ số, ví dụ <code>0215<\/code>; máy dùng giờ này để tính trùng giờ và giờ nghỉ.<\/li><li>Bấm dòng <b>định mức<\/b> để đặt số người riêng cho ngày đó (ghi <i>(riêng)<\/i> khi khác mặc định).<\/li><li><b>Đặt lại theo lịch bay mặc định<\/b>: bỏ mọi thay đổi của tuần, lấy lại từ Cài đặt → Slot.<\/li><li><b>Nhập từ ảnh / văn bản<\/b>: dán hoặc chụp lịch bay hãng gửi.<\/li><\/ul>\n<h3 id=\"hs9\">Chuyến delay<\/h3>\n<ol><li>Ở tab Lịch bay, bấm <b>⏱ báo delay<\/b> dưới chuyến bị delay (ví dụ TW4 đêm T2), nhập số phút hoặc bấm nhanh +30' … +180'.<\/li><li>Bảng bên dưới liệt kê người làm chuyến đó (kể cả người trong ca làm chung G2/G3) và ca hôm sau của họ. Ai bị <b>thiếu nghỉ<\/b> thì chọn:<ul><li><b>Đổi sang ca trễ hơn<\/b>: trang đổi ca với một người không bị delay (người đó lên ca sớm hơn).<\/li><li><b>Giữ nguyên ca (người này muốn)<\/b>: lịch giữ nguyên, chỉ cảnh báo vàng.<\/li><\/ul><\/li><li>Bấm <b>Áp dụng<\/b>. Trang báo lại ai đã đổi với ai; chưa ưng thì bấm Hoàn tác. Ô đã khoá 🔒 không bị đổi.<\/li><\/ol>\n<h3 id=\"hs10\">Order nghỉ<\/h3>\n<p>Nhập nghỉ của cả tuần trước khi chia. Chọn trong ô là lưu ngay.<\/p>\n<ul><li>Mỗi ô là danh sách: Nghỉ (OFF, OFF1/2…), Phép/ốm (NP, ốm…), Standby (SBY), Việc khác (học, TKT…).<\/li><li>Đầu cột ghi tổng OFF và phép/ốm từng ngày để cân số người nghỉ. Cột cuối là tổng OFF của mỗi người.<\/li><li>Ô hiện chip chuyến bên dưới là người đó đã có chuyến; nhập nghỉ vào đó sẽ báo đỏ ở Lịch tuần cho đến khi chia lại.<\/li><li><b>Xoá hết OFF tự thêm<\/b>: bỏ các ngày OFF máy tự thêm khi chia, giữ OFF bạn nhập.<\/li><\/ul>\n<h3 id=\"hs11\">Quân số<\/h3>\n<p>Bảng chuyến × ngày, mỗi ô ghi <i>đã xếp / định mức<\/i>; dòng nhỏ bên dưới là vị trí đặc biệt (Supervisor…). Ô đỏ là thiếu người. Bấm vào ô để xem ai đang làm, bấm <b>Bỏ<\/b> để gỡ người, hoặc chọn người phù hợp trong danh sách gợi ý để thêm.<\/p>\n<h2 id=\"hs12\">Bảng năng lực nhân viên (chỉ người làm lịch)<\/h2>\n<p>Tab <b>Năng lực<\/b> chỉ hiện với người làm lịch. Dữ liệu lưu ở vùng bí mật trên máy chủ (<code>secrets/skills<\/code>), tài khoản chỉ xem lịch không thấy tab và không đọc được.<\/p>\n<p><b>Máy tự lập bảng<\/b> từ 8 tuần đã chia gần nhất: mỗi người làm hãng nào bao nhiêu lượt, từng làm Supervisor (/S) hãng nào, bao nhiêu đêm/tuần, có ghi chú OJT / TRAIN / HỌC / KÈM không. Tên có gắn hãng trong file Excel (như \"HOÀI BẢO OD FD\", \"… AKFD\") cũng được tính là đã có chứng chỉ hãng đó.<\/p>\n<table><thead><tr><th>Ký hiệu<\/th><th>Mức<\/th><th>Máy tự xếp như thế nào<\/th><\/tr><\/thead><tbody><tr><td>★<\/td><td>Thành thạo / kèm được người mới<\/td><td>Ưu tiên cao nhất<\/td><\/tr><tr><td>●<\/td><td>Làm tốt (thường xuyên)<\/td><td>Ưu tiên<\/td><\/tr><tr><td>○<\/td><td>Đã làm được<\/td><td>Bình thường<\/td><\/tr><tr><td>◐<\/td><td>Đang học<\/td><td>Hạn chế, chỉ xếp khi thiếu người<\/td><\/tr><tr><td>✕<\/td><td>Không xếp hãng này<\/td><td>Không bao giờ xếp (hiện cảnh báo nếu xếp tay)<\/td><\/tr><tr><td>·<\/td><td>Chưa có dữ liệu<\/td><td>Như đang học<\/td><\/tr><\/tbody><\/table>\n<ul><li><b>Sửa mức:<\/b> bấm vào ô trong bảng, chọn mức. Mức bạn chọn tay có viền đậm và luôn thắng mức máy tự tính. Chọn \"Theo máy\" để bỏ.<\/li><li><b>Khoá hãng:<\/b> tick ô khoá trên đầu cột (mặc định khoá <b>MH<\/b> và <b>EK<\/b>, vì phân tích các tuần cũ cho thấy 2 hãng này gần như chỉ người có chứng chỉ làm). Hãng đã khoá thì người chưa có năng lực hãng đó không được máy xếp. Nếu hãng có dưới 3 người đủ năng lực, khoá tạm không áp dụng (trang báo màu vàng) để không bị thiếu người.<\/li><li>Số nhỏ chữ <b>S<\/b> cạnh ký hiệu: người đó đã từng làm /S hãng đó. Máy ưu tiên người này khi xếp Supervisor.<\/li><li>Cột <b>Ghi chú<\/b>: ghi chứng chỉ, hạn chế sức khoẻ… chỉ người làm lịch đọc.<\/li><li>Lọc theo tên, hãng, mức tối thiểu để tìm nhanh ai làm được hãng nào. Bấm <b>Tính lại<\/b> sau khi nhập thêm tuần cũ.<\/li><li>Trong ô gợi ý người (bấm vào ô trống ở Lịch tuần) có huy hiệu mức năng lực cạnh từng tên.<\/li><\/ul>\n<p>Bảng càng chính xác khi có nhiều tuần lịch chia tay: nhập file Excel 2–4 tuần gần nhất (cả các mẫu mới như \"LỊCH QT … HÀNG DEMO\", \"LỊCH TUẦN …\") để máy học.<\/p>\n<h2 id=\"hs13\">Tự động chia<\/h2>\n<p><b>Cách tính giờ làm:<\/b> mỗi chuyến tính từ lúc mở quầy (3 tiếng trước giờ bay) đến lúc đóng quầy (1 tiếng trước giờ bay). Vì vậy một người được ghép 2 chuyến cách nhau từ 2 tiếng (như AK3 16:05 + FD4 18:10, FD1 10:05 + OD 12:50) giống cách chia tay, còn chuyến sát giờ (MH 11:25 + FD3 12:00) bị chặn. Đổi ở Cài đặt → Quy tắc (Phút làm trước / sau giờ chuyến).<\/p>\n<p><b>Học theo các tuần đã chia:<\/b> khi bấm Tự động chia, máy dùng bảng năng lực (tab Năng lực) và đọc 4 tuần gần nhất và ưu tiên xếp mỗi người vào hãng / chuyến họ hay làm, cặp chuyến hay ghép (G3 + TW1, RS + Z2, EK + MH…), và hạn chế quá 5 đêm/tuần. Lượt do người chia đặt được tính nặng hơn lượt máy tự xếp. Muốn máy học nhanh: nhập file Excel lịch đã chia tay của 1–2 tuần gần nhất (⇪ Nhập dữ liệu → Excel). Chỉnh mức ưu tiên ở Cài đặt → Quy tắc. Các chuyến đêm TW (TW26, TW14, TW30) mở quầy làm chung: xếp người vào ca <b>G3<\/b> (G3/S là sup cho cả 3 chuyến; lên ca 22:25 đêm có TW26, 22:00 đêm không có) và <b>G2<\/b> (lên ca 00:50). Lịch xếp trước đây bị trùng giờ: bấm <b>Tự động chia → Chỉ lấp chỗ trống<\/b>, máy tự gỡ chỗ trùng (trừ ô khoá) rồi xếp lại.<\/p>\n<p>Bấm <b>Tự động chia<\/b>, chọn cách chia rồi bấm <b>Chia lịch<\/b>. Máy xếp từng ngày: lấp vị trí khó trước (Supervisor, vị trí đặc biệt, slot ít người làm được), chọn người hợp lệ đang ít việc nhất, rồi cân bằng giờ đêm giữa mọi người.<\/p>\n<table><thead><tr><th>Cách chia<\/th><th>Khi nào dùng<\/th><\/tr><\/thead><tbody><tr><td><b>Chỉ lấp chỗ trống<\/b><\/td><td>Đã có lịch, chỉ cần bù chỗ thiếu (có người xin nghỉ đột xuất, thêm chuyến). Giữ mọi phân công hiện có<\/td><\/tr><tr><td><b>Xếp lại toàn bộ<\/b><\/td><td>Tuần mới, hoặc muốn một phương án khác. Bỏ phân công chưa khóa và OFF tự thêm rồi chia từ đầu<\/td><\/tr><\/tbody><\/table>\n<ul><li><i>Tự thêm 1 ngày OFF cho người chưa có<\/i>: máy chọn ngày ít người nghỉ nhất. Ở tab Order nghỉ, OFF tự thêm có viền nét đứt để phân biệt với OFF bạn nhập.<\/li><li>Máy <b>không bao giờ<\/b> đổi ô đã khóa 🔒 và trạng thái nghỉ bạn nhập.<\/li><li>Mỗi lần <i>Xếp lại<\/i> cho phương án hơi khác. Chưa ưng thì bấm <b>↶ Hoàn tác<\/b>.<\/li><li>Chạy xong, trang báo số lượt đã xếp và chuyến còn thiếu (nếu có), kèm nút <b>Xem quân số<\/b>.<\/li><\/ul>\n<p>Trên thanh công cụ tab Lịch tuần còn có hai nút hỗ trợ: <b>Khoá phân công hiện có<\/b> (khóa hết ô đã xếp để lần chia sau giữ nguyên) và <b>Xoá phân công chưa khoá<\/b> (làm trống để chia lại).<\/p>\n<h2 id=\"hs14\">Nhập dữ liệu từ ảnh, văn bản, CSV, Excel<\/h2>\n<p>Cách nhanh nhất: bấm <b>📷 Nhập từ ảnh<\/b>, chụp trang sổ hoặc chọn ảnh nhận qua Zalo. AI tự nhận biết loại dữ liệu và hiện bảng kiểm tra. Muốn chọn rõ hơn thì bấm <b>⇪ Nhập dữ liệu<\/b>.<\/p>\n<p><b>Bước 1 – Loại dữ liệu:<\/b><\/p>\n<table><thead><tr><th>Loại<\/th><th>Nhập gì<\/th><\/tr><\/thead><tbody><tr><td>Tự nhận biết<\/td><td>AI tự xem ảnh là loại nào<\/td><\/tr><tr><td>Phân ca<\/td><td>Chuyến + trạng thái của từng người, từng ngày<\/td><\/tr><tr><td>OFF / NP / nghỉ<\/td><td>Chỉ trạng thái, giữ nguyên chuyến đã xếp<\/td><\/tr><tr><td>Chấm công<\/td><td>Phút OVER / BÙ ngày, đêm<\/td><\/tr><tr><td>Lịch bay<\/td><td>Chuyến, giờ, CANX theo ngày<\/td><\/tr><\/tbody><\/table>\n<p><b>Bước 2 – Nguồn:<\/b><\/p>\n<table><thead><tr><th>Nguồn<\/th><th>Cách đọc<\/th><th>Cần AI?<\/th><\/tr><\/thead><tbody><tr><td>Ảnh chụp, ảnh màn hình, PDF<\/td><td>Bấm <b>Đọc bằng AI<\/b><\/td><td>Có<\/td><\/tr><tr><td>Dán bảng từ Excel / Google Sheets<\/td><td>Bấm <b>Đọc như bảng<\/b><\/td><td>Không<\/td><\/tr><tr><td>Văn bản tự do (tin Zalo, email)<\/td><td>Bấm <b>Đọc bằng AI<\/b><\/td><td>Có<\/td><\/tr><tr><td>File CSV / TSV / TXT<\/td><td>Đọc theo cột<\/td><td>Không<\/td><\/tr><tr><td>File Excel mẫu cũ<\/td><td><b>Chọn file Excel…<\/b><\/td><td>Không<\/td><\/tr><\/tbody><\/table>\n<p>Với ảnh: chọn nhiều ảnh cùng lúc được; ảnh nghiêng bấm <b>⟳ Xoay<\/b>; ảnh chọn nhầm bấm <b>Bỏ<\/b>. Trong lúc đọc, trang hiện tiến độ từng ảnh; bấm <b>Dừng<\/b> để huỷ. AI báo bận thì trang tự thử lại; ảnh nào vẫn lỗi thì bấm <b>Đọc lại ảnh lỗi<\/b>.<\/p>\n<p><b>Bước 3 – Kiểm tra:<\/b><\/p>\n<ol><li>Bảng kiểm tra hiện ảnh gốc bên cạnh, mỗi dòng ghi nội dung đọc được và nội dung đang có trong lịch.<\/li><li>Dòng vàng là cần xem lại (tên chưa khớp, chữ mờ). Bật <i>Chỉ hiện dòng cần xem lại<\/i> để lọc.<\/li><li>Sửa trực tiếp: chọn lại nhân viên, ngày, trạng thái, chuyến; bỏ chọn dòng không muốn nhập.<\/li><li>Bấm <b>Kiểm tra xong, nhập vào lịch…<\/b>. Trang hỏi lại <i>Dữ liệu đã chuẩn chưa?<\/i>.<\/li><li>Xác nhận: trang <b>tự tạo bản sao lưu<\/b> của tuần rồi mới ghi.<\/li><\/ol>\n<p><b>Nhập sai thì sao:<\/b> bấm <b>↶ Hoàn tác<\/b> ngay sau khi nhập. Nếu đã làm thêm nhiều việc, vào <b>Cài đặt &amp; dữ liệu → Nhập / xuất dữ liệu → Xem và khôi phục…<\/b>, chọn bản sao lưu trước lần nhập đó và bấm <b>Khôi phục<\/b>. Trang giữ 30 bản gần nhất.<\/p>\n<p><b>Mẹo chụp ảnh:<\/b> chụp thẳng, đủ sáng, cả bảng nằm trong khung; bảng dài thì chụp nhiều ảnh. Viết tên đúng như danh sách nhân viên sẽ giảm dòng vàng.<\/p>\n<h3 id=\"hs15\">Bảng đếm cuối file Excel (định mức)<\/h3>\n<p>Các file lịch mẫu mới có bảng đếm ở cuối (dòng OFF, NP, LE rồi TW1, GRP3, FD1/S, EK/C…). Khi nhập file, máy đọc bảng này:<\/p>\n<ul><li><b>Định mức từng chuyến, từng ngày:<\/b> số gõ tay ở cột trái (vd GRP3 = 8 đêm có TW26, 5 các đêm khác; \"4/ 1 HO TRO BRD\" = cần 4 người) được dùng làm tổng số người cần. File đã chia sẵn thì máy lấy đúng số người /S, /C, /G và nhân viên thường đã xếp. Ô định mức hiện chữ <i>(riêng)<\/i> ở tab Lịch bay. Bỏ tick <b>Lấy định mức theo file<\/b> nếu muốn giữ định mức mặc định trong Cài đặt.<\/li><li><b>CANX<\/b> ghi ở bảng đếm: chuyến ngày đó được tắt.<\/li><li><b>Ghi chú<\/b> (2 VJQT, 1 HỖ TRỢ BRD, CAT 1…): hiện dưới ô chuyến ở tab Lịch bay, có biểu tượng 📝.<\/li><li><b>Đối chiếu:<\/b> nếu số đếm trong file khác số máy đọc được, hộp nhập báo ⚠ kèm chuyến và ngày. Thường do gõ cách chữ (\"R S\", \"E K\") hoặc ghi chuyến ở cột trạng thái. Mở ô đó ở tab Lịch tuần để sửa.<\/li><\/ul>\n<p>Tuần mới tạo bằng <b>+ Tuần mới<\/b> kế thừa định mức theo ngày của tuần trước, nên chỉ cần nhập file một lần là các tuần sau dùng đúng số người.<\/p>\n<h2 id=\"hs16\">Thống kê, Chấm công, Xuất Excel<\/h2>\n<h3 id=\"hs17\">Thống kê<\/h3>\n<ul><li>Hàng số liệu trên cùng: vị trí còn thiếu, tỷ lệ đã phủ (%), số lỗi, số cảnh báo.<\/li><li><b>Mức độ công bằng<\/b>: biểu đồ từng người, chọn thước đo <i>Giờ công đêm<\/i>, <i>Số ca đêm<\/i>, <i>Số slot<\/i>, <i>Ngày làm<\/i>. Vạch vàng là trung bình.<\/li><li><b>Cảnh báo và vi phạm<\/b>: dòng đỏ là lỗi phải sửa, dòng vàng là cảnh báo. Bấm một dòng để nhảy đến ô đó.<\/li><li><b>Chi tiết theo nhân viên<\/b>: slot, đêm, đêm tuần trước, giờ đêm, ngày làm, OFF, phép/ốm, SBY và số chuyến theo từng hãng.<\/li><\/ul>\n<h3 id=\"hs18\">Chấm công<\/h3>\n<ol><li>Chọn ngày ở hàng nút phía trên.<\/li><li>Nhập số <b>phút<\/b> OVER ngày, OVER đêm, BÙ ngày, BÙ đêm cho từng người. Gõ xong là lưu.<\/li><li>Các cột tổng, giờ công và giờ đêm tự tính. Giờ công mặc định = số ngày làm × 8 giờ (đổi ở Cài đặt → Quy tắc).<\/li><\/ol>\n<p>Có thể chụp sổ chấm công rồi nhập bằng <b>📷 Nhập từ ảnh<\/b>.<\/p>\n<h3 id=\"hs19\">Xuất Excel<\/h3>\n<p>Bấm <b>Xuất Excel<\/b> (tab Lịch tuần) hoặc <b>Tải file Excel<\/b> (Cài đặt → Nhập / xuất). File có màu giống trên web, gồm 7 sheet: Lịch tuần (kèm bảng đếm quân số), Quân số, Lịch bay, Order nghỉ, Thống kê, Chấm công, Cảnh báo. Khổ in ngang, có số trang. Người xem cũng xuất được.<\/p>\n<h2 id=\"hs20\">Chốt tuần và nhân viên nghỉ việc<\/h2>\n<p>Chốt tuần giữ lịch đã chạy và chấm công đúng như lúc đó, kể cả khi sau này danh sách nhân viên hoặc chuyến thay đổi.<\/p>\n<ol><li>Mở tuần đã xong và đã chấm công.<\/li><li>Bấm <b>🔒 Chốt tuần<\/b> trên thanh công cụ tab Lịch tuần, xác nhận.<\/li><li>Đầu trang hiện dải <b>Tuần đã chốt<\/b> kèm thời điểm và người chốt.<\/li><\/ol>\n<p>Tuần đã chốt không sửa được: không nhập dữ liệu, không tự động chia, không sửa cài đặt trong lúc đang mở tuần đó. Vẫn xem và xuất Excel bình thường. Cần sửa thì bấm <b>Mở khoá để sửa<\/b> trên dải báo, sửa xong chốt lại.<\/p>\n<p><b>Nhân viên nghỉ việc, chuyến bỏ hẳn:<\/b> khi bấm <b>Xoá<\/b> ở Cài đặt, trang hỏi lại và gợi ý:<\/p>\n<ul><li><b>Chuyển sang tạm nghỉ<\/b> (với người) hoặc <b>Tắt slot<\/b> (với chuyến): ẩn khỏi các tuần mới nhưng tuần cũ vẫn còn tên. Nên chọn cách này.<\/li><li><b>Xoá hẳn<\/b>: chỉ dùng khi nhập nhầm. Tuần đã chốt vẫn giữ tên; tuần chưa chốt sẽ mất dòng của người đó.<\/li><\/ul>\n<h2 id=\"hs21\">Cài đặt &amp; dữ liệu<\/h2>\n<p>Cài đặt dùng chung cho mọi tuần chưa chốt; sửa xong là lưu và tính lại cảnh báo ngay.<\/p>\n<table><thead><tr><th>Mục<\/th><th>Chỉnh gì<\/th><\/tr><\/thead><tbody><tr><td><b>Nhân viên<\/b><\/td><td>Tên, nhóm, loại (Chuyến bay / Ticket / PVDB), vị trí được xếp (/S, /C, /G…), Không đêm, Tự động chia (bỏ chọn = chỉ xếp tay), Đang làm (bỏ chọn = tạm nghỉ), Chỉ làm (để trống = mọi hãng; ghi ví dụ AK, FD, VZ1 để giới hạn), ghi chú. <b>+ Thêm nhân viên<\/b> ở đầu bảng<\/td><\/tr><tr><td><b>Slot chuyến bay<\/b><\/td><td>Hãng, số hiệu, giờ, tuyến, giờ đêm, phút làm trước/sau chuyến (mặc định mở quầy 3 tiếng trước giờ bay), <b>Lên ca<\/b>, <b>Lên ca nếu có chuyến<\/b> (vd TW3=2225), <b>Xuống ca<\/b>, <b>Làm chung chuyến<\/b> (vd G3 làm chung TW3, TW4, TW5), số người cần theo từng vị trí, ngày bay mặc định T2→CN. <b>+ Thêm slot<\/b><\/td><\/tr><tr><td><b>Mã trạng thái<\/b><\/td><td>OFF, NP, ốm, SBY, học…: ý nghĩa, có chặn xếp chuyến không, loại (nghỉ / phép / standby / việc khác), tính bao nhiêu OFF. <b>+ Thêm mã<\/b><\/td><\/tr><tr><td><b>Quy tắc chia lịch<\/b><\/td><td>Tối đa slot/ngày, giờ nghỉ tối thiểu giữa 2 ngày, tối đa ca đêm/tuần, OFF tối thiểu, tối đa ngày làm, phút trước/sau chuyến, giờ ranh giới qua đêm, cặp slot được làm cùng giờ, giờ công mỗi ca, tự thêm OFF, tên nhóm<\/td><\/tr><tr><td><b>Nhập / xuất dữ liệu<\/b><\/td><td>Nhập từ ảnh/văn bản, bản sao lưu tự động, nhập file Excel mẫu cũ, tải file Excel, tải/khôi phục bản sao lưu toàn bộ (JSON), xoá tuần, Đọc ảnh bằng AI, Thư viện của trang<\/td><\/tr><tr><td><b>Quyền truy cập<\/b><\/td><td>Danh sách email người làm lịch và người xem<\/td><\/tr><tr><td><b>Gửi tin<\/b><\/td><td>Bật gửi lịch qua Email (Gmail) và Telegram, xem danh sách người đăng ký<\/td><\/tr><\/tbody><\/table>\n<p><b>Bật AI đọc ảnh (người quản lý làm một lần):<\/b><\/p>\n<ol><li>Mở aistudio.google.com/apikey, đăng nhập Google, bấm <b>Create API key<\/b>, chép khoá (dạng <code>AQ.Ab…<\/code>).<\/li><li>Vào <b>Nhập / xuất dữ liệu → Đọc ảnh bằng AI<\/b>, dán khoá, bấm <b>Bật cho cả nhóm<\/b>.<\/li><li>Bấm <b>Kiểm tra khoá<\/b> để thử. <b>Đổi khoá<\/b> khi cần thay, <b>Tắt AI<\/b> để ngừng.<\/li><\/ol>\n<p>Khoá lưu trên Firebase, chỉ người làm lịch dùng được. Không dán khoá vào file nào trên GitHub.<\/p>\n<p><b>Thư viện của trang (một lần):<\/b> bấm <b>Tải bộ thư viện (lib.zip)<\/b>, giải nén ra thư mục <code>lib<\/code>, tải cả thư mục lên kho GitHub cùng chỗ với <code>index.html<\/code>. Khi đã xong, mục này hiện <i>✓ Đã lưu trong kho GitHub<\/i>.<\/p>\n<p><b>Sao lưu định kỳ:<\/b> cuối mỗi tuần bấm <b>Tải bản sao lưu<\/b> để giữ một file JSON trên máy. File này chứa tên nhân viên, không đưa lên GitHub.<\/p>\n<h2 id=\"hs22\">Gửi lịch cho nhân viên (Zalo, SMS, Email, Telegram)<\/h2>\n<p>Cách đơn giản nhất chỉ cần <b>số điện thoại<\/b> và/hoặc <b>email<\/b> của từng người. Nhân viên không phải đăng ký gì.<\/p>\n<p><b>Nhập danh bạ (một lần):<\/b> vào <b>Cài đặt &amp; dữ liệu → Gửi tin → Danh bạ nhận lịch<\/b>.<\/p>\n<ul><li>Gõ SĐT, email vào từng dòng, hoặc bấm <b>Dán nhanh cả danh sách<\/b>: mỗi dòng <i>Tên, SĐT, email<\/i> (chép từ Excel/Zalo được), bấm <b>Điền vào danh bạ<\/b>.<\/li><li>Danh bạ chỉ người làm lịch xem được.<\/li><\/ul>\n<p><b>Gửi mỗi tuần:<\/b> bấm <b>📣 Gửi lịch<\/b> ở tab Lịch tuần, chọn <b>Lịch cả tuần<\/b> hoặc <b>Chỉ người có thay đổi<\/b> (ngày đổi được đánh dấu \"◀ mới\"). Ở danh sách <b>Gửi từng người<\/b>:<\/p>\n<table><thead><tr><th>Nút<\/th><th>Làm gì<\/th><th>Bạn cần làm<\/th><\/tr><\/thead><tbody><tr><td><b>Zalo<\/b><\/td><td>Chép sẵn tin và mở khung chat Zalo của số điện thoại đó<\/td><td>Dán (giữ ngón tay → Dán) rồi gửi<\/td><\/tr><tr><td><b>SMS<\/b><\/td><td>Mở tin nhắn điện thoại soạn sẵn (dùng trên điện thoại)<\/td><td>Bấm gửi<\/td><\/tr><tr><td><b>Email<\/b><\/td><td>Mở thư soạn sẵn trong ứng dụng email<\/td><td>Bấm gửi<\/td><\/tr><tr><td><b>Chép<\/b><\/td><td>Chép tin để dán vào bất cứ đâu<\/td><td><\/td><\/tr><\/tbody><\/table>\n<p>Nút <b>Chép tin cho nhóm Zalo<\/b> tạo tin báo \"lịch đã có\" kèm danh sách người bị đổi lịch, để dán vào nhóm Zalo của tổ.<\/p>\n<p><b>Tuỳ chọn: gửi tự động, không phải bấm từng người<\/b><\/p>\n<ul><li><b>Email tự động<\/b> (miễn phí qua Gmail, khoảng 100 thư/ngày): ở Cài đặt → Gửi tin, làm 5 bước tạo Google Apps Script (khoảng 10 phút, một lần). Sau đó bấm <b>Gửi ngay<\/b> là email tự đi tới mọi người có email trong danh bạ.<\/li><li><b>Telegram tự động:<\/b> tạo bot với @BotFather, dán mã bot. Telegram không gửi được theo số điện thoại, nên nhân viên phải tự bấm <b>🔔 Nhận lịch → Kết nối Telegram<\/b> một lần.<\/li><li>Zalo không có cách gửi tự động miễn phí, nên dùng nút Zalo ở trên.<\/li><\/ul>\n<p>Nhân viên vẫn có thể tự bấm <b>🔔 Nhận lịch<\/b> để tự nhập email của mình; người làm lịch không cần làm gì thêm.<\/p>\n<h2 id=\"hs23\">Câu hỏi thường gặp và xử lý lỗi<\/h2>\n<table><thead><tr><th>Gặp<\/th><th>Cách xử lý<\/th><\/tr><\/thead><tbody><tr><td><i>Chưa được cấp quyền<\/i><\/td><td>Gửi email đăng nhập cho người quản lý để thêm vào Quyền truy cập<\/td><\/tr><tr><td>Không thấy nút sửa, Tự động chia<\/td><td>Tài khoản đang là Người xem<\/td><\/tr><tr><td><i>Tuần này đã chốt nên không sửa được<\/i><\/td><td>Bấm <b>Mở khoá để sửa<\/b> trên dải báo đầu trang<\/td><\/tr><tr><td><i>Không có quyền ghi… hãy dán lại firestore.rules<\/i><\/td><td>Người quản lý dán file <code>firestore.rules<\/code> mới vào Firebase và bấm Publish<\/td><\/tr><tr><td><i>AI đọc ảnh chưa được bật<\/i><\/td><td>Người quản lý bật theo mục <i>Cài đặt<\/i>. Trong lúc chờ, dùng Dán văn bản<\/td><\/tr><tr><td><i>Gemini đang quá tải<\/i><\/td><td>Trang tự thử lại. Nếu vẫn lỗi, đợi vài phút rồi bấm <b>Đọc lại ảnh lỗi<\/b><\/td><\/tr><tr><td>AI đọc sai tên<\/td><td>Chọn lại tên trong bảng kiểm tra trước khi nhập<\/td><\/tr><tr><td>Nhập nhầm dữ liệu<\/td><td>↶ Hoàn tác, hoặc khôi phục bản sao lưu tự động<\/td><\/tr><tr><td>Chuyến vẫn thiếu sau khi chia<\/td><td>Không còn người hợp lệ (đã nghỉ, thiếu giờ nghỉ, hết số đêm). Bấm ô đỏ ở Quân số để thêm ngoại lệ, hoặc nới quy tắc<\/td><\/tr><tr><td>Người khác không thấy thay đổi<\/td><td>Xem chấm trạng thái đã xanh <i>Đã lưu · đồng bộ<\/i> chưa. Tab ở nền quá 1 phút sẽ tự đồng bộ khi mở lại<\/td><\/tr><tr><td>Nhân viên bấm Start mà chưa kết nối Telegram<\/td><td>Người làm lịch mở trang, vào Cài đặt → Gửi tin → <b>Cập nhật kết nối<\/b>. Nếu đã quá 1 ngày, nhân viên bấm Kết nối lại<\/td><\/tr><tr><td>Email báo <i>Sai khoá bí mật<\/i><\/td><td>Bấm <b>Chép mã Apps Script<\/b> lại, dán đè vào Apps Script, Triển khai → Quản lý triển khai → sửa → Phiên bản mới<\/td><\/tr><tr><td>GitHub đã cập nhật mà trang chưa đổi<\/td><td>Đợi 1–2 phút rồi tải lại trang (Ctrl+F5)<\/td><\/tr><\/tbody><\/table>\n<p>Bản quyền © 2026 ThienNV · thiennv@vnpt-technology.vn · 0888.99.33.00<\/p>"};
 /* ---------- Hướng dẫn sử dụng trong trang ---------- */
 /* HELP_DOCS được build.py tạo từ help_staff.md và help_editor.md */
 const HelpUI = {
@@ -4588,14 +4718,14 @@ function renderFixes() {
   // từng chỗ thiếu
   const groups = {}; pos.forEach(p => { const k = p.slot + '|' + p.d + '|' + p.role; (groups[k] = groups[k] || Object.assign({ n: 0 }, p)).n++; });
   const list = Object.values(groups).sort((a, b) => a.d - b.d || a.slot.localeCompare(b.slot));
-  const candMap = {}; let freeN = 0; for (const g of list.slice(0, 40)) { candMap[g.slot + '|' + g.d + '|' + g.role] = C.diagnose(S.cfg, w, g, 3); if (candMap[g.slot + '|' + g.d + '|' + g.role].some(c => c.kind === 'free')) freeN++; }
+  const candMap = {}; let freeN = 0; for (const g of list.slice(0, 40)) { candMap[g.slot + '|' + g.d + '|' + g.role] = C.diagnose(cfgX(), w, g, 3); if (candMap[g.slot + '|' + g.d + '|' + g.role].some(c => c.kind === 'free')) freeN++; }
   if (freeN) b += '<div class="issue warn" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><span>' + freeN + ' chỗ vẫn còn người rảnh hợp lệ. Bấm để máy tự lấp trước, rồi xem lại các chỗ còn lại.</span><button class="btn pri sm" data-fx="autofill">Tự động lấp chỗ trống</button></div>';
   b += '<h3>Từng chỗ thiếu (' + pos.length + ')</h3><p class="help">Bấm một đề xuất là áp dụng ngay (bấm Hoàn tác nếu không ưng). "Xếp ngoại lệ" sẽ khoá 🔒 ô đó và chỉ cảnh báo vàng.</p><div class="fxlist">';
   for (const g of list.slice(0, 40)) {
-    const cands = candMap[g.slot + '|' + g.d + '|' + g.role] || C.diagnose(S.cfg, w, g, 3);
+    const cands = candMap[g.slot + '|' + g.d + '|' + g.role] || C.diagnose(cfgX(), w, g, 3);
     b += '<div class="fxrow"><div class="fxh"><b>' + esc(g.slot) + (g.role !== 'A' ? '/' + g.role : '') + '</b> ' + esc(C.dayLabel(w.start, g.d)) + ' · thiếu ' + g.n + '</div><div class="fxa">' +
       cands.map(c => {
-        const lab = c.kind === 'free' ? 'Xếp ' + c.name : c.kind === 'moveOff' ? (() => { const t = C.offTarget(S.cfg, w, c.sid, g.d); return t >= 0 ? 'Dời OFF ' + c.name + ' sang ' + DAYS[t] + ' rồi xếp' + (c.why.length ? ' (vượt: ' + c.why.join(', ') + ')' : '') : ''; })() : 'Xếp ngoại lệ ' + c.name + ' (vượt: ' + c.why.join(', ') + ')';
+        const lab = c.kind === 'free' ? 'Xếp ' + c.name : c.kind === 'moveOff' ? (() => { const t = C.offTarget(S.cfg, w, c.sid, g.d); return t >= 0 ? 'Dời OFF ' + c.name + ' sang ' + DAYS[t] + ' rồi xếp' + (c.why.length ? ' (vượt: ' + c.why.join(', ') + ')' : '') : ''; })() : 'Xếp ngoại lệ ' + c.name + ' (vượt: ' + c.why.map(x => x.replace(/^⚠ /, '')).join(', ') + ')';
         return lab ? '<button class="btn sm' + (c.kind === 'free' ? ' pri' : '') + '" data-fx="assign" data-sid="' + c.sid + '" data-slot="' + esc(g.slot) + '" data-d="' + g.d + '" data-role="' + g.role + '" data-kind="' + c.kind + '">' + esc(lab) + '</button>' : '';
       }).join('') +
       '<button class="btn sm" data-fx="dem" data-slot="' + esc(g.slot) + '" data-d="' + g.d + '" data-role="' + g.role + '" data-tip="Giảm định mức chuyến này trong ngày này đi 1 người">Giảm định mức −1</button>' +
@@ -4624,9 +4754,9 @@ const FIX_SCEN = () => {
 async function runSims() {
   FIX.simRunning = true; renderFixes();
   const L = await historyModel().catch(() => null);
-  const count = cfg => { const res = C.autoAssign(cfg, S.week, { mode: 'fill', learn: L, seed: 5 }); return C.shortPositions(cfg, res.week).length; };
+  const count = cfg => { cfg = Object.assign({}, cfg, cfgX() !== S.cfg ? { skills: SKILL.compiled } : {}); const res = C.autoAssign(cfg, S.week, { mode: 'fill', learn: L, seed: 5 }); return C.shortPositions(cfg, res.week).length; };
   await new Promise(r => setTimeout(r, 20));
-  FIX.base = count(S.cfg); const out = [];
+  FIX.base = count(cfgX()); const out = [];
   for (const sc of FIX_SCEN()) {
     await new Promise(r => setTimeout(r, 10));
     const cfg = Object.assign({}, S.cfg, { rules: Object.assign({}, S.cfg.rules, sc.rules) });
@@ -4641,6 +4771,7 @@ async function runSims() {
     '.fxlist{display:flex;flex-direction:column;gap:6px}.fxrow{border:1px solid var(--line2);border-radius:8px;padding:8px 10px}.fxh{font-size:13px;margin-bottom:6px}.fxa{display:flex;flex-wrap:wrap;gap:6px;align-items:center}' +
     '@media (max-width:640px){.capg{grid-template-columns:repeat(4,1fr)}}';
   document.head.appendChild(css);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && $('#fixHost') && $('#fixHost').innerHTML) fixPanel(''); });
   document.addEventListener('click', e => {
     const a0 = e.target.closest('[data-act="fixes"]'); if (a0) { closeModal(); openFixes(); return; }
     const t = e.target.closest('[data-fx]'); if (!t) return;
@@ -4674,12 +4805,218 @@ async function runSims() {
           if (to >= 0) { const c1 = C.ensureCell(w, sid, to); c1.status = 'OFF'; c1.autoOff = true; }
         }
         const it = { slot, role: role === 'A' ? '' : role, lock: true };
-        if (kind !== 'free' && C.checkAssign(C.makeCtx(S.cfg, w), staffById(sid), slot, d, role).length) it.ok = true;
+        if (kind !== 'free' && C.checkAssign(C.makeCtx(cfgX(), w), staffById(sid), slot, d, role).length) it.ok = true;
         C.ensureCell(w, sid, d).items.push(it);
       }, { noRender: true });
       toast('Đã xếp ' + nm + ' vào ' + slot + ' ' + DAYS[d]); FIX.sims = null; render(); renderFixes();
     }
   });
+})();
+
+/* ---------- Bảng năng lực nhân viên (chỉ người làm lịch xem) ---------- */
+// Mức: star = chính / được chứng nhận (ghi sau tên trong file, hoặc làm rất nhiều) · good = thạo · done = đã làm
+//      learn = đang học / OJT · x = không xếp hãng này · '' = chưa làm
+const SK_LV = {
+  star: { t: '★', name: 'Chính / chứng nhận', cls: 'sk-star' },
+  good: { t: '●', name: 'Thạo', cls: 'sk-good' },
+  done: { t: '○', name: 'Đã làm', cls: 'sk-done' },
+  learn: { t: '◐', name: 'Đang học / OJT', cls: 'sk-learn' },
+  x: { t: '✕', name: 'Không xếp', cls: 'sk-x' },
+  none: { t: '·', name: 'Chưa có năng lực', cls: 'sk-none' }
+};
+const SK_TAGX = { AKFD: ['AK', 'FD'], VZTW: ['VZ', 'TW'], VZBX: ['VZ', 'BX'] };
+const SK_AIRTAGS = ['EK', 'MH', 'HX', 'LJ', 'RS', 'OD', 'FD', 'AK', 'VZ', 'TW', 'BX', 'Z2', 'AKFD', 'VZTW', 'VZBX'];
+// ký hiệu hãng sau tên trong file Excel: cất vào bảng năng lực (riêng tư), chỉ giữ KD / X trong danh sách nhân viên
+function stashSkillTags(cfg) {
+  if (S.ro) return; const moved = {};
+  for (const sf of cfg.staff) { const air = (sf.tags || []).filter(t => SK_AIRTAGS.includes(t)); if (air.length) { moved[sf.id] = air; sf.tags = sf.tags.filter(t => !SK_AIRTAGS.includes(t)); } }
+  if (!Object.keys(moved).length) return;
+  SKILL.load().then(() => { SKILL.data.tags = Object.assign({}, SKILL.data.tags || {}, moved); return SKILL.save(); }).then(() => { SKILL.compile(); }).catch(() => {});
+}
+const SKILL = {
+  data: null,          // { map: { sid: { AIR: lv } }, locks: { AIR: true }, notes: { sid: text } } — chỉnh tay, lưu riêng
+  auto: null,          // { cnt, sup, roles, learn, nights, weeks } — tính từ các tuần đã chia
+  compiled: null,      // { lv, sup, locks } — đưa vào bộ chia lịch
+  loading: false, filter: { q: '', air: '', min: '' },
+  enabled() { return !S.ro; },
+  async load() {
+    if (this.data) return this.data;
+    let d = null;
+    if (Store.mode === 'fb') { try { const s = await FBX.fs.doc('secrets/skills').get(); d = s.exists ? s.data() : null; } catch (e) { d = null; } }
+    else { try { d = JSON.parse(localStorage.getItem('pcsb:skills') || 'null'); } catch (e) {} }
+    this.data = d || { map: {}, notes: {} };
+    if (!this.data.map) this.data.map = {};
+    if (!this.data.notes) this.data.notes = {};
+    if (!this.data.locks) this.data.locks = { MH: true, EK: true }; // phân tích lịch cũ: MH, EK gần như chỉ người được chứng nhận làm
+    return this.data;
+  },
+  async save() {
+    const d = Object.assign({}, this.data, { at: new Date().toISOString(), by: Store.mode === 'fb' && FBX.user ? FBX.user.email : '' });
+    if (Store.mode === 'fb') await FBX.fs.doc('secrets/skills').set(d);
+    else { try { localStorage.setItem('pcsb:skills', JSON.stringify(d)); } catch (e) {} }
+  },
+  airlines() {
+    const out = [];
+    for (const s of S.cfg.slots) { if (!s.active) continue; const a = s.airline || s.id; if (!out.includes(a)) out.push(a); }
+    return out;
+  },
+  // học từ tối đa 8 tuần gần nhất (kể cả tuần đang mở)
+  async analyze() {
+    this.loading = true;
+    const starts = S.weeks.filter(s => !S.week || s <= S.week.start).slice(-8);
+    const weeks = [];
+    for (const s of starts) {
+      if (S.week && s === S.week.start) { weeks.push(S.week); continue; }
+      if (!HIST.cache[s]) { try { HIST.cache[s] = await Store.getWeek(s); } catch (e) { HIST.cache[s] = null; } }
+      if (HIST.cache[s]) weeks.push(HIST.cache[s]);
+    }
+    const sm = {}; S.cfg.slots.forEach(s => sm[s.id] = s);
+    const A = { cnt: {}, sup: {}, roles: {}, learn: {}, nights: {}, weeks: weeks.length, from: starts[0] || '', to: starts[starts.length - 1] || '', items: 0 };
+    const AIRS = this.airlines();
+    const learnRe = /(OJT|TRAIN|HỌC|HOC|KÈM|KEM)\s*([A-Z ]{2,6}\d?)/gi;
+    for (const w of weeks) for (const sid in (w.cells || {})) for (const d in w.cells[sid]) {
+      const c = w.cells[sid][d] || {};
+      for (const it of c.items || []) {
+        const s = sm[it.slot]; if (!s) continue; const a = s.airline || s.id; const wt = it.auto ? 0.5 : 1;
+        ((A.cnt[sid] = A.cnt[sid] || {})[a] = (A.cnt[sid][a] || 0) + wt); A.items++;
+        if (it.role) { (A.roles[sid] = A.roles[sid] || {})[it.role] = (A.roles[sid][it.role] || 0) + 1; if (it.role === 'S') (A.sup[sid] = A.sup[sid] || {})[a] = (A.sup[sid][a] || 0) + 1; }
+        if (s.night) A.nights[sid] = (A.nights[sid] || 0) + 1;
+      }
+      const t = ((c.status || '') + ' ' + (c.note || '')).toUpperCase();
+      let m; learnRe.lastIndex = 0;
+      while ((m = learnRe.exec(t))) {
+        const code = m[2].replace(/\s+/g, '').replace(/\d+$/, '');
+        const a = AIRS.find(x => code.startsWith(x)); if (a) (A.learn[sid] = A.learn[sid] || {})[a] = (/KÈM|KEM/.test(m[1]) ? 'mentor' : 'learn');
+      }
+    }
+    this.auto = A; this.loading = false; this.compile();
+    return A;
+  },
+  tagsOf(sid) {
+    const sf = staffById(sid); const out = [];
+    for (const t of [...((sf && sf.tags) || []), ...(((this.data && this.data.tags) || {})[sid] || [])]) for (const x of (SK_TAGX[t] || [t])) if (!out.includes(x)) out.push(x);
+    return out;
+  },
+  autoLevel(sid, air) {
+    const A = this.auto || { cnt: {}, learn: {} };
+    const n = (A.cnt[sid] || {})[air] || 0, tag = this.tagsOf(sid).includes(air);
+    const learn = (A.learn[sid] || {})[air];
+    if (tag || n >= 8 || learn === 'mentor') return 'star';
+    if (n >= 4) return 'good';
+    if (n >= 1) return learn === 'learn' && n < 2 ? 'learn' : 'done';
+    if (learn === 'learn') return 'learn';
+    return '';
+  },
+  level(sid, air) { const m = ((this.data && this.data.map[sid]) || {})[air]; if (m === 'none') return ''; return m || this.autoLevel(sid, air); },
+  compile() {
+    if (!this.data) return;
+    const lv = {}, sup = {}; const AIRS = this.airlines();
+    for (const sf of S.cfg.staff) {
+      lv[sf.id] = {}; for (const a of AIRS) { const v = this.level(sf.id, a); if (v) lv[sf.id][a] = v; }
+      sup[sf.id] = Object.assign({}, (this.auto && this.auto.sup[sf.id]) || {});
+      // người có vị trí /S và là "chính" của hãng cũng được xem là giám sát được hãng đó
+      if ((sf.roles || []).includes('S')) for (const a of AIRS) if (lv[sf.id][a] === 'star') sup[sf.id][a] = sup[sf.id][a] || 1;
+    }
+    // khoá hãng chỉ có hiệu lực khi đã có ít nhất 3 người có năng lực hãng đó (tránh chặn hết khi chưa đủ dữ liệu)
+    const locks = {}; this.weakLocks = [];
+    for (const a in this.data.locks) { if (!this.data.locks[a]) continue; const n = S.cfg.staff.filter(sf => sf.active && ['star', 'good', 'done', 'learn'].includes(lv[sf.id][a])).length; if (n >= 3) locks[a] = true; else this.weakLocks.push(a); }
+    this.compiled = { lv, sup, locks };
+  }
+};
+// cấu hình dùng cho kiểm tra / chia lịch: thêm bảng năng lực khi là người làm lịch
+function cfgX() { return SKILL.compiled && !S.ro ? Object.assign({}, S.cfg, { skills: SKILL.compiled }) : S.cfg; }
+// tính lại nhanh (tuần cũ đã có trong bộ nhớ) trước khi chia lịch / khi đổi tuần
+async function skillsRefresh() { if (S.ro || !SKILL.data || SKILL.loading) return; try { await SKILL.analyze(); } catch (e) {} }
+async function skillsInit() {
+  if (S.ro || !S.cfg) return;
+  try { await SKILL.load(); await SKILL.analyze(); recompute(); render(); } catch (e) { console.warn(e); }
+}
+function skillBadge(sid, air) {
+  if (!SKILL.compiled || !air) return '';
+  const lv = (SKILL.compiled.lv[sid] || {})[air] || 'none'; const L = SK_LV[lv];
+  return '<span class="skb ' + L.cls + '" title="' + esc(air + ': ' + L.name) + '">' + L.t + '</span>';
+}
+function viewSkills() {
+  if (S.ro) return '<div class="empty"><h2>Chỉ người làm lịch xem được</h2></div>';
+  if (!SKILL.data || !SKILL.auto) { if (!SKILL.loading) skillsInit(); return '<p class="muted">Đang phân tích các tuần đã chia…</p>'; }
+  const A = SKILL.auto, AIRS = SKILL.airlines(), F = SKILL.filter;
+  const airName = a => a === 'G' ? 'G2/G3' : a;
+  let staff = S.cfg.staff.filter(s => s.active && s.kind === 'flight');
+  if (F.q) { const q = C.key(F.q); staff = staff.filter(s => C.key(s.name).includes(q)); }
+  if (F.air) {
+    const rank = { star: 4, good: 3, done: 2, learn: 1, '': 0, x: -1 };
+    staff = staff.filter(s => { const l = SKILL.level(s.id, F.air); return F.min === 'any' ? true : rank[l] >= (F.min === 'done' ? 2 : F.min === 'good' ? 3 : 1); });
+    staff.sort((a, b) => rank[SKILL.level(b.id, F.air)] - rank[SKILL.level(a.id, F.air)] || (((A.cnt[b.id] || {})[F.air] || 0) - ((A.cnt[a.id] || {})[F.air] || 0)));
+  }
+  const totals = {}; for (const a of AIRS) { totals[a] = { star: 0, good: 0, done: 0, learn: 0 }; for (const s of S.cfg.staff.filter(x => x.active && x.kind === 'flight')) { const l = SKILL.level(s.id, a); if (totals[a][l] != null) totals[a][l]++; } }
+  let h = '<div class="bar"><span class="help">🔒 Bảng này <b>chỉ người làm lịch xem được</b>. Mức năng lực tự tính từ <b>' + A.weeks + ' tuần</b> đã chia (' + (A.from ? weekName(A.from).split(' – ')[0] : '') + ' → ' + (A.to ? weekName(A.to) : '') + ', ' + Math.round(A.items) + ' lượt) và ký hiệu hãng ghi sau tên trong file Excel (vd "NGỌC 2 EK"). Bấm vào ô để chỉnh tay; ô chỉnh tay có viền đậm. Tự động chia dùng bảng này.</span><span class="spacer"></span><button class="btn" data-skact="reanalyze">Tính lại</button></div>';
+  if (SKILL.weakLocks && SKILL.weakLocks.length) h += '<div class="issue warn">Hãng ' + esc(SKILL.weakLocks.join(', ')) + ' đang bật 🔒 nhưng chưa đủ 3 người có năng lực trong dữ liệu, nên khoá <b>tạm chưa áp dụng</b>. Nhập thêm lịch cũ hoặc đánh dấu năng lực bằng tay.</div>';
+  h += '<div class="bar"><input class="inp" id="skq" placeholder="Tìm nhân viên…" value="' + esc(F.q) + '" style="width:170px">' +
+    '<select class="sel" id="skair"><option value="">Ai làm được hãng…</option>' + AIRS.map(a => '<option value="' + esc(a) + '"' + (F.air === a ? ' selected' : '') + '>' + esc(airName(a)) + '</option>').join('') + '</select>' +
+    (F.air ? '<select class="sel" id="skmin"><option value="learn"' + (F.min === 'learn' || !F.min ? ' selected' : '') + '>từ đang học trở lên</option><option value="done"' + (F.min === 'done' ? ' selected' : '') + '>từ đã làm trở lên</option><option value="good"' + (F.min === 'good' ? ' selected' : '') + '>chỉ thạo / chính</option><option value="any"' + (F.min === 'any' ? ' selected' : '') + '>tất cả</option></select>' : '') +
+    '<span class="legend">' + ['star', 'good', 'done', 'learn', 'x'].map(k => '<span><span class="skb ' + SK_LV[k].cls + '">' + SK_LV[k].t + '</span> ' + SK_LV[k].name + '</span>').join('') + '<span><span class="skb sk-none">S</span> từng làm giám sát hãng đó</span></span></div>';
+  h += '<div class="scroll"><table class="g skt"><thead><tr><th class="stick">Nhân viên</th>' + AIRS.map(a => {
+    const locked = SKILL.data.locks[a];
+    return '<th class="c"><div>' + esc(airName(a)) + '</div><label class="sklock" title="Khoá: Tự động chia chỉ xếp người có năng lực hãng này (★ ● ○ ◐)"><input type="checkbox" data-sklock="' + esc(a) + '"' + (locked ? ' checked' : '') + '>🔒</label><div class="muted skc">' + (totals[a].star + totals[a].good) + '/' + (totals[a].star + totals[a].good + totals[a].done + totals[a].learn) + '</div></th>';
+  }).join('') + '<th>Vị trí đã làm</th><th>Đêm/tuần</th><th>Ghi chú năng lực</th></tr></thead><tbody>';
+  for (const sf of staff) {
+    const roles = (A.roles[sf.id] || {}); const nw = A.weeks ? ((A.nights[sf.id] || 0) / A.weeks) : 0;
+    h += '<tr><td class="stick name gc' + sf.group + '">' + esc(sf.name) + (SKILL.tagsOf(sf.id).filter(t => t !== 'KD').length ? ' <span class="muted" style="font-size:11px">' + esc(SKILL.tagsOf(sf.id).filter(t => t !== 'KD').join(' ')) + '</span>' : '') + (sf.noNight ? ' <span class="muted" style="font-size:11px">· KĐ</span>' : '') + '</td>';
+    for (const a of AIRS) {
+      const man = (SKILL.data.map[sf.id] || {})[a]; const lv = SKILL.level(sf.id, a) || 'none'; const L = SK_LV[lv];
+      const n = Math.round(((A.cnt[sf.id] || {})[a] || 0) * 10) / 10; const sup = (SKILL.compiled.sup[sf.id] || {})[a];
+      h += '<td class="c skcell' + (man ? ' man' : '') + '" data-sk="' + sf.id + '|' + esc(a) + '" title="' + esc(sf.name + ' · ' + airName(a) + ': ' + L.name + (n ? ' · ' + n + ' lượt' : '') + (sup ? ' · từng làm /S' : '') + (man ? ' · chỉnh tay' : ' · tự tính')) + '"><span class="skb ' + L.cls + '">' + L.t + '</span>' + (n ? '<small>' + n + '</small>' : '') + (sup ? '<sup>S</sup>' : '') + '</td>';
+    }
+    h += '<td style="white-space:nowrap;font-size:12px">' + Object.entries(roles).sort((x, y) => y[1] - x[1]).map(([r, n]) => '/' + esc(r) + ' ' + n).join(' · ') + '</td><td class="c">' + (Math.round(nw * 10) / 10) + '</td>' +
+      '<td><input class="inp" data-sknote="' + sf.id + '" value="' + esc(SKILL.data.notes[sf.id] || '') + '" placeholder="vd: kèm OJT HX, sắp thi EK" style="width:200px"></td></tr>';
+  }
+  h += '</tbody></table></div><p class="help">Gợi ý: hãng nào chỉ người được đào tạo mới làm được thì bật 🔒 ở đầu cột (mặc định khoá MH, EK vì lịch cũ cho thấy gần như chỉ người có chứng nhận làm). Người <b>✕</b> không bao giờ được máy xếp hãng đó. Người <b>◐ đang học</b> chỉ được xếp khi cần, máy ưu tiên người ★ ●. Vị trí <b>/S</b> ưu tiên người từng làm giám sát đúng hãng (chữ S nhỏ). Xếp tay vẫn được, lịch chỉ cảnh báo vàng.</p>';
+  return h;
+}
+(function () {
+  const css = document.createElement('style');
+  css.textContent = '.skt th .sklock{display:block;font-size:11px;font-weight:400;cursor:pointer}.skt th .skc{font-size:10.5px;font-weight:400}.skcell{cursor:pointer;white-space:nowrap}.skcell small{font-size:10px;color:var(--mute);margin-left:2px}.skcell sup{font-size:9px;color:var(--ok);font-weight:700}.skcell.man{box-shadow:inset 0 0 0 2px var(--accent)}' +
+    '.skb{display:inline-block;min-width:16px;text-align:center;font-weight:700}.sk-star{color:#b8860b}.sk-good{color:var(--ok)}.sk-done{color:var(--ink2)}.sk-learn{color:var(--sby)}.sk-x{color:var(--err)}.sk-none{color:var(--line)}' +
+    '.skpop{position:fixed;z-index:80;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);padding:6px;display:flex;flex-direction:column;min-width:190px}.skpop button{text-align:left;background:none;border:0;padding:7px 10px;border-radius:6px;cursor:pointer;color:var(--ink);font-size:13px}.skpop button:hover{background:var(--panel2)}.skpop .hd{font-size:12px;color:var(--mute);padding:4px 10px}';
+  document.head.appendChild(css);
+  const closePop = () => { const p = document.querySelector('.skpop'); if (p) p.remove(); };
+  document.addEventListener('click', async e => {
+    const opt = e.target.closest('[data-skset]');
+    if (opt) {
+      const [sid, air, lv] = opt.dataset.skset.split('|'); closePop();
+      const m = SKILL.data.map[sid] = SKILL.data.map[sid] || {};
+      if (lv === 'auto') delete m[air]; else m[air] = lv;
+      if (!Object.keys(m).length) delete SKILL.data.map[sid];
+      SKILL.compile(); recompute(); render();
+      try { await SKILL.save(); toast('Đã lưu bảng năng lực'); } catch (err) { toast(err && err.code === 'permission-denied' ? 'Không có quyền lưu. Hãy dán lại firestore.rules mới.' : 'Lỗi lưu: ' + (err && err.message)); }
+      return;
+    }
+    const cell = e.target.closest('[data-sk]');
+    if (cell) {
+      closePop();
+      const [sid, air] = cell.dataset.sk.split('|'); const sf = staffById(sid); const auto = SKILL.autoLevel(sid, air) || 'none';
+      const pop = document.createElement('div'); pop.className = 'skpop';
+      pop.innerHTML = '<div class="hd">' + esc(sf.name) + ' · ' + esc(air === 'G' ? 'G2/G3' : air) + '</div>' +
+        '<button data-skset="' + sid + '|' + esc(air) + '|auto">↺ Tự tính (' + SK_LV[auto].t + ' ' + SK_LV[auto].name + ')</button>' +
+        ['star', 'good', 'done', 'learn', 'x', 'none'].map(k => '<button data-skset="' + sid + '|' + esc(air) + '|' + k + '"><span class="skb ' + SK_LV[k].cls + '">' + SK_LV[k].t + '</span> ' + SK_LV[k].name + '</button>').join('');
+      document.body.appendChild(pop);
+      const r = cell.getBoundingClientRect(); const pw = pop.offsetWidth, ph = pop.offsetHeight;
+      pop.style.left = Math.max(8, Math.min(r.left, innerWidth - pw - 8)) + 'px'; pop.style.top = (r.bottom + ph + 8 > innerHeight ? Math.max(8, r.top - ph - 4) : r.bottom + 4) + 'px';
+      return;
+    }
+    if (!e.target.closest('.skpop')) closePop();
+    const b = e.target.closest('[data-skact]');
+    if (b && b.dataset.skact === 'reanalyze') { HIST.cache = {}; SKILL.auto = null; render(); await SKILL.analyze(); recompute(); render(); toast('Đã tính lại từ ' + SKILL.auto.weeks + ' tuần'); }
+  });
+  document.addEventListener('change', async e => {
+    const t = e.target;
+    if (t.dataset && t.dataset.sklock) { SKILL.data.locks[t.dataset.sklock] = t.checked; if (!t.checked) delete SKILL.data.locks[t.dataset.sklock]; SKILL.compile(); recompute(); try { await SKILL.save(); toast(t.checked ? 'Đã khoá hãng ' + t.dataset.sklock + ': chỉ xếp người có năng lực' : 'Đã mở khoá hãng ' + t.dataset.sklock); } catch (err) { toast('Lỗi lưu'); } render(); return; }
+    if (t.dataset && t.dataset.sknote) { const v = t.value.trim().slice(0, 200); if (v) SKILL.data.notes[t.dataset.sknote] = v; else delete SKILL.data.notes[t.dataset.sknote]; try { await SKILL.save(); toast('Đã lưu ghi chú'); } catch (err) { toast('Lỗi lưu'); } return; }
+    if (t.id === 'skair') { SKILL.filter.air = t.value; SKILL.filter.min = SKILL.filter.min || 'learn'; render(); return; }
+    if (t.id === 'skmin') { SKILL.filter.min = t.value; render(); return; }
+  });
+  document.addEventListener('input', e => { if (e.target.id === 'skq') { SKILL.filter.q = e.target.value; clearTimeout(SKILL._qt); SKILL._qt = setTimeout(() => { render(); const i = $('#skq'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }, 250); } });
+  addEventListener('scroll', closePop, true);
 })();
 
 boot();

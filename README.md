@@ -153,6 +153,10 @@ Khi tuần đã chạy xong và chấm công xong, bấm **🔒 Chốt tuần** 
 - Mỗi tuần bấm **📣 Gửi lịch** ở tab Lịch tuần: gửi cả tuần hoặc chỉ người có thay đổi. Zalo: bấm Chép rồi dán vào nhóm.
 - **Bắt buộc:** dán lại `firestore.rules` mới (có thêm mục `subs` và `sendlog`), nếu không nhân viên sẽ không lưu được đăng ký.
 
+## Bảng năng lực nhân viên
+
+Tab **Năng lực** (chỉ người làm lịch thấy) tự lập từ các tuần đã chia: ai làm hãng nào, mức ★ ● ○ ◐ ✕, ai từng làm /S. Mặc định khoá MH và EK cho người có năng lực. Lưu ở `secrets/skills` — quy tắc `secrets/{docId}` hiện có đã chặn người xem, **không cần dán lại firestore.rules**.
+
 ## Dùng hằng ngày
 
 - **Hướng dẫn trong trang:** nút **📖 Hướng dẫn** trên thanh trên cùng (và link *Xem hướng dẫn* ở màn hình đăng nhập). Người xem thấy bản cho nhân viên; người làm lịch thấy thêm bản đầy đủ. Mỗi bản đọc trực tiếp, tải Word, hoặc in / lưu PDF.
