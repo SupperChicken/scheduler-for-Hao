@@ -4,6 +4,19 @@ Bản quyền © 2026 ThienNV · thiennv@vnpt-technology.vn · 0888.99.33.00
 
 Mã phiên bản hiện ở cuối trang (Cài đặt → Nhập / xuất → Nơi lưu dữ liệu) và trong `config/app` trên Firebase. Mỗi lần thay `index.html`, ghi thêm một mục ở đầu file này: ngày, ai cập nhật, thay đổi gì. Gặp lỗi sau khi cập nhật: lấy lại `index.html` bản trước trong lịch sử GitHub (bấm file → History → chọn bản cũ → … → View file → Raw → lưu lại, rồi tải lên).
 
+## 2026-10-10 (2) · Lãnh đạo xem Năng lực, Nhật ký; ghi chú nhân viên lưu riêng
+
+- Lãnh đạo xem được tab **Năng lực** (chỉ xem) và **Nhật ký thay đổi** (cuối tab Thống kê).
+- **Ghi chú nhân viên** (Cài đặt → Nhân viên) chuyển sang `secrets/staffnotes`: chỉ người làm lịch và lãnh đạo đọc được. Ghi chú cũ tự chuyển khi người làm lịch mở trang; ghi chú trong các tuần đã chốt cũng được xoá khỏi bản chụp.
+- Cần dán lại `firestore.rules`.
+
+## 2026-10-10 · Phân quyền 3 nhóm
+
+- Thêm nhóm **Lãnh đạo (trưởng / phó)**: xem Thống kê, Quân số, Chấm công (chỉ xem), Báo cáo tháng, cảnh báo; không sửa được.
+- **Nhân viên** chỉ còn tab Lịch tuần; không thấy cảnh báo, thống kê, chấm công của người khác; Excel chỉ có sheet Lịch tuần + Lịch bay.
+- OVER / BÙ (chấm công) lưu riêng ở `weeks/{tuần}/ot`, Firebase chặn hẳn với nhân viên. Tuần cũ được tự chuyển khi người làm lịch mở trang.
+- Cần dán lại `firestore.rules`.
+
 ## 2026-10 · Bản vận hành lâu dài
 
 - **Mã nhân viên** (Cài đặt → Nhân viên): báo trùng tên / trùng mã, dán mã hàng loạt từ Excel, có trong Chấm công và Báo cáo tháng; tìm nhân viên theo mã.
